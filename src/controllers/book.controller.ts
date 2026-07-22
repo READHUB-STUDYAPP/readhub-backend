@@ -2,6 +2,7 @@ import type { Request, Response } from 'express'
 import fs from 'fs/promises'
 import type { UploadApiResponse } from 'cloudinary'
 import cloudinary from '../config/cloudinary.js'
+import { isCloudinaryUrl } from '../utils/validators.js'
 import Book from '../models/Books.js'
 import ReadingSession from '../models/readingSession.js'
 import UserStats from '../models/userStatistics.js'
@@ -45,18 +46,10 @@ export const uploadBook = async (req: Request, res: Response) => {
     if (!title || !coverImageUrl || !fileUrl || !pages) {
       return res.status(400).json({ message: 'All fields are required' })
     }
-    if (
-      !coverImageUrl.includes(
-        `res.cloudinary.com/${process.env.CLOUDINARY_CLOUD_NAME}`,
-      )
-    ) {
+    if (!isCloudinaryUrl(coverImageUrl)) {
       return res.status(400).json({ error: 'Invalid image source' })
     }
-    if (
-      !fileUrl.includes(
-        `res.cloudinary.com/${process.env.CLOUDINARY_CLOUD_NAME}`,
-      )
-    ) {
+    if (!isCloudinaryUrl(fileUrl)) {
       return res.status(400).json({ error: 'Invalid file source' })
     }
     const newBook = new Book({
@@ -241,7 +234,8 @@ export const endReading = async (req: Request, res: Response) => {
     const { sessionId, endPage } = req.body
     const userId = req.user!.id
 
-    const session = await ReadingSession.findById(sessionId)
+    // Scope to the requesting user so one user cannot end/alter another's session.
+    const session = await ReadingSession.findOne({ _id: sessionId, user: userId })
 
     if (!session) {
       return res.status(404).json({ message: 'Session not found' })
