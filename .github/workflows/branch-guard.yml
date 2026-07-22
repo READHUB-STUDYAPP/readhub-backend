@@ -1,0 +1,46 @@
+name: Promotion Guard
+
+# Enforces the one-directional branch flow so PRs can't skip tiers:
+#   feature/* -> dev -> staging -> main   (promotion)
+#   main -> staging -> dev                (back-merge of hotfixes)
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+
+jobs:
+  promotion-guard:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate base/head pairing
+        env:
+          BASE: ${{ github.base_ref }}
+          HEAD: ${{ github.head_ref }}
+        run: |
+          echo "PR: $HEAD -> $BASE"
+          case "$BASE" in
+            main)
+              if [[ "$HEAD" == "staging" || "$HEAD" == hotfix/* ]]; then
+                echo "OK: valid release into main"; exit 0
+              fi
+              echo "::error::PRs into 'main' must come from 'staging' (promotion) or 'hotfix/*'. Got '$HEAD'."
+              exit 1
+              ;;
+            staging)
+              if [[ "$HEAD" == "dev" || "$HEAD" == "main" || "$HEAD" == hotfix/* ]]; then
+                echo "OK: valid promotion/back-merge into staging"; exit 0
+              fi
+              echo "::error::PRs into 'staging' must come from 'dev' (promotion), 'main' (back-merge), or 'hotfix/*'. Got '$HEAD'."
+              exit 1
+              ;;
+            dev)
+              if [[ "$HEAD" == "main" ]]; then
+                echo "::error::Do not PR 'main' directly into 'dev'. Back-merge via 'staging'."
+                exit 1
+              fi
+              echo "OK: work branch or back-merge into dev"; exit 0
+              ;;
+            *)
+              echo "No promotion rule for base '$BASE'; skipping."
+              exit 0
+              ;;
+          esac
