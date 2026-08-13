@@ -1,7 +1,7 @@
 import type { Request, Response } from 'express'
-import cloudinary from '../config/cloudinary.js'
+import { presignPut, publicUrl, buildKey } from '../config/s3.js'
 import User from '../models/User.js'
-import { isCloudinaryUrl } from '../utils/validators.js'
+import { isStoredFileUrl } from '../utils/validators.js'
 
 const errMessage = (error: unknown): string =>
   error instanceof Error ? error.message : String(error)
@@ -15,24 +15,13 @@ export const generatePictureSignature = async (
       return res.status(401).json({ message: 'Unauthorized' })
     }
 
-    const timestamp = Math.round(Date.now() / 1000)
+    const contentType = String(req.query.contentType || 'image/jpeg')
+    const ext = String(req.query.ext || (contentType.split('/')[1] ?? 'jpg')).toLowerCase()
+    const key = buildKey('profile_pictures', req.user!.id, ext)
+    const uploadUrl = await presignPut(key, contentType)
 
-    const paramsToSign = {
-      timestamp,
-      folder: 'profile_pictures',
-    }
-
-    const signature = cloudinary.utils.api_sign_request(
-      paramsToSign,
-      process.env.CLOUDINARY_API_SECRET as string,
-    )
-
-    return res.json({
-      ...paramsToSign,
-      signature,
-      apiKey: process.env.CLOUDINARY_API_KEY,
-      cloudName: process.env.CLOUDINARY_CLOUD_NAME,
-    })
+    // Frontend PUTs the image to `uploadUrl`, then saves `publicUrl` as profilePicture.
+    return res.json({ uploadUrl, method: 'PUT', key, contentType, publicUrl: publicUrl(key) })
   } catch (error) {
     return res.status(500).json({
       message: 'Failed to generate signature',
@@ -56,7 +45,7 @@ export const updateUserProfile = async (req: Request, res: Response) => {
     if (email) updateUser.email = email
 
     if (profilePicture) {
-      if (!isCloudinaryUrl(profilePicture)) {
+      if (!isStoredFileUrl(profilePicture)) {
         return res.status(400).json({ message: 'Invalid image source' })
       }
 

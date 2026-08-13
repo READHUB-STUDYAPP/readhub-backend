@@ -1,8 +1,8 @@
 import type { Request, Response } from 'express'
 import fs from 'fs/promises'
-import type { UploadApiResponse } from 'cloudinary'
-import cloudinary from '../config/cloudinary.js'
-import { isCloudinaryUrl } from '../utils/validators.js'
+import { createReadStream } from 'fs'
+import { s3, PutObjectCommand, S3_BUCKET, presignPut, publicUrl, buildKey } from '../config/s3.js'
+import { isStoredFileUrl } from '../utils/validators.js'
 import Book from '../models/Books.js'
 import ReadingSession from '../models/readingSession.js'
 import UserStats from '../models/userStatistics.js'
@@ -15,25 +15,17 @@ export const generatePdfSignature = async (req: Request, res: Response) => {
   try {
     if (!req.user) return res.status(401).json({ message: 'Unauthorized' })
 
-    const timestamp = Math.round(Date.now() / 1000)
-
-    const paramsToSign = {
-      timestamp,
-      folder: 'documents',
-      allowed_formats: 'pdf,doc,docx,txt',
+    const allowed = ['pdf', 'doc', 'docx', 'txt']
+    const ext = String(req.query.ext || 'pdf').toLowerCase()
+    if (!allowed.includes(ext)) {
+      return res.status(400).json({ message: 'Unsupported file type' })
     }
+    const contentType = String(req.query.contentType || 'application/octet-stream')
+    const key = buildKey('documents', req.user.id, ext)
+    const uploadUrl = await presignPut(key, contentType)
 
-    const signature = cloudinary.utils.api_sign_request(
-      paramsToSign,
-      process.env.CLOUDINARY_API_SECRET as string,
-    )
-
-    res.json({
-      ...paramsToSign,
-      signature,
-      apiKey: process.env.CLOUDINARY_API_KEY,
-      cloudName: process.env.CLOUDINARY_CLOUD_NAME,
-    })
+    // Frontend PUTs the file to `uploadUrl`, then saves `publicUrl` on the book.
+    res.json({ uploadUrl, method: 'PUT', key, contentType, publicUrl: publicUrl(key) })
   } catch (error) {
     res.status(500).json({ error: errMessage(error) })
   }
@@ -46,10 +38,10 @@ export const uploadBook = async (req: Request, res: Response) => {
     if (!title || !coverImageUrl || !fileUrl || !pages) {
       return res.status(400).json({ message: 'All fields are required' })
     }
-    if (!isCloudinaryUrl(coverImageUrl)) {
+    if (!isStoredFileUrl(coverImageUrl)) {
       return res.status(400).json({ error: 'Invalid image source' })
     }
-    if (!isCloudinaryUrl(fileUrl)) {
+    if (!isStoredFileUrl(fileUrl)) {
       return res.status(400).json({ error: 'Invalid file source' })
     }
     const newBook = new Book({
@@ -443,20 +435,19 @@ export const uploadBookFile = async (req: Request, res: Response) => {
     const filePath = req.file.path
 
     try {
-      const result = (await cloudinary.uploader.upload_large(filePath, {
-        resource_type: 'raw',
-        folder: 'documents',
-        use_filename: true,
-        unique_filename: true,
-      })) as UploadApiResponse
+      const ext = req.file.originalname?.split('.').pop() || 'bin'
+      const key = buildKey('documents', req.user.id, ext)
+      await s3.send(
+        new PutObjectCommand({
+          Bucket: S3_BUCKET,
+          Key: key,
+          Body: createReadStream(filePath),
+          ContentType: req.file.mimetype || 'application/octet-stream',
+          ContentLength: req.file.size,
+        }),
+      )
 
-      return res.status(200).json({
-        url: result.secure_url,
-        publicId: result.public_id,
-        resourceType: result.resource_type,
-        format: result.format,
-        bytes: result.bytes,
-      })
+      return res.status(200).json({ url: publicUrl(key), key, bytes: req.file.size })
     } finally {
       // Best-effort cleanup of temp file
       fs.unlink(filePath).catch(() => {})
