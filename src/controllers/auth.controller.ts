@@ -36,7 +36,7 @@ export const register = async (req: Request, res: Response) => {
         .json({ message: 'Password must be at least 6 characters' })
     }
 
-    const hashedPassword = await bcrypt.hash(password, 10)
+    const hashedPassword = await bcrypt.hash(password, 12)
 
     const newUser = new User({
       username,
@@ -212,7 +212,6 @@ export const passwordOTP = async (req: Request, res: Response) => {
         .json({ message: 'User not found, please register' })
     }
     const username = user.username
-    console.log(username)
 
     res.status(201).json({
       message: `Verification code sent to ${email}, check your inbox or spam folder`,
@@ -246,8 +245,17 @@ export const resetPassword = async (req: Request, res: Response) => {
       return res.status(400).json({ message: 'Invalid or expired code' })
     }
 
+    // Reject (and clear) an expired code rather than relying solely on the TTL sweep.
+    if (verificationRecord.expiresAt < new Date()) {
+      await VerificationCode.deleteOne({ _id: verificationRecord._id })
+      return res.status(400).json({ message: 'Invalid or expired code' })
+    }
+
     const hashedPassword = await bcrypt.hash(password, 12)
     await User.updateOne({ email }, { $set: { password: hashedPassword } })
+
+    // Consume the code so it cannot be reused.
+    await VerificationCode.deleteOne({ _id: verificationRecord._id })
 
     res.json({ message: 'Password reset successfully' })
   } catch (error) {
