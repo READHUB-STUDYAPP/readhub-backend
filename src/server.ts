@@ -2,10 +2,12 @@ import express from 'express'
 import cors from 'cors'
 import dotenv from 'dotenv'
 import morgan from 'morgan'
+import helmet from 'helmet'
 import cookieParser from 'cookie-parser'
 import swaggerUi from 'swagger-ui-express'
 import swaggerSpec from './config/swagger.js'
 import connectDB from './config/db.js'
+import { sanitizeBody } from './middlewares/sanitize.js'
 import authRoutes from './routes/auth.routes.js'
 import userProfile from './routes/userProfile.route.js'
 import cloudinaryRoutes from './routes/cloudinary-uploads.route.js'
@@ -24,6 +26,9 @@ const allowedOrigin = [
   process.env.DEVELOPMENT_TEST,
 ].filter((origin): origin is string => Boolean(origin))
 
+// Security headers. CSP is disabled to avoid interfering with the Swagger UI
+// assets served at /api-docs; all other hardening headers still apply.
+app.use(helmet({ contentSecurityPolicy: false }))
 app.use(
   cors({
     origin: allowedOrigin,
@@ -32,6 +37,7 @@ app.use(
 )
 app.use(express.urlencoded({ extended: true }))
 app.use(express.json())
+app.use(sanitizeBody)
 app.use(cookieParser())
 app.use(morgan('dev'))
 

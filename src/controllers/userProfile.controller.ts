@@ -1,6 +1,7 @@
 import type { Request, Response } from 'express'
 import cloudinary from '../config/cloudinary.js'
 import User from '../models/User.js'
+import { isCloudinaryUrl } from '../utils/validators.js'
 
 const errMessage = (error: unknown): string =>
   error instanceof Error ? error.message : String(error)
@@ -55,11 +56,7 @@ export const updateUserProfile = async (req: Request, res: Response) => {
     if (email) updateUser.email = email
 
     if (profilePicture) {
-      if (
-        !profilePicture.includes(
-          `res.cloudinary.com/${process.env.CLOUDINARY_CLOUD_NAME}`,
-        )
-      ) {
+      if (!isCloudinaryUrl(profilePicture)) {
         return res.status(400).json({ message: 'Invalid image source' })
       }
 

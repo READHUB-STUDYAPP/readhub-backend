@@ -28,7 +28,8 @@ export const createNote = async (req: Request, res: Response) => {
       })
     }
 
-    const checkBook = await Book.findById(bookId)
+    // Only allow notes on a book the user owns (prevents cross-user note writes).
+    const checkBook = await Book.findOne({ _id: bookId, uploadedBy: userId })
     if (!checkBook) {
       return res.status(404).json({ message: 'Book not found' })
     }
