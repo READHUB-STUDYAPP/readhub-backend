@@ -1,5 +1,7 @@
 import mongoose, { Schema, Document, Model } from 'mongoose'
 
+export type UserRole = 'user' | 'admin'
+
 export interface IUser extends Document {
   username: string
   profilePicture?: string
@@ -7,6 +9,7 @@ export interface IUser extends Document {
   password?: string
   googleId?: string
   provider: ('local' | 'google')[]
+  role: UserRole
   refreshToken?: string
   createdAt: Date
   updatedAt: Date
@@ -37,6 +40,12 @@ const userSchema = new Schema<IUser>(
       type: [String],
       enum: ['local', 'google'],
       default: ['local'],
+    },
+    role: {
+      type: String,
+      enum: ['user', 'admin'],
+      default: 'user',
+      index: true,
     },
     refreshToken: {
       type: String,
