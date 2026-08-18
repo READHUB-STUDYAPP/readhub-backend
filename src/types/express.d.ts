@@ -4,6 +4,8 @@ import 'express'
 
 export interface AuthUser {
   id: string
+  // Populated by the `requireAdmin` RBAC middleware after a DB role check.
+  role?: 'user' | 'admin'
   iat?: number
   exp?: number
 }
