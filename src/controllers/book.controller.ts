@@ -15,12 +15,13 @@ export const generatePdfSignature = async (req: Request, res: Response) => {
   try {
     if (!req.user) return res.status(401).json({ message: 'Unauthorized' })
 
-    const allowed = ['pdf', 'doc', 'docx', 'txt']
-    const ext = String(req.query.ext || 'pdf').toLowerCase()
+    const allowed = ['pdf', 'epub', 'doc', 'docx', 'txt']
+    const contentType = String(req.query.contentType || 'application/octet-stream').toLowerCase()
+    const requestedExt = String(req.query.ext || '').toLowerCase().replace(/^\./, '')
+    const ext = contentType === 'application/epub+zip' ? 'epub' : requestedExt || 'pdf'
     if (!allowed.includes(ext)) {
       return res.status(400).json({ message: 'Unsupported file type' })
     }
-    const contentType = String(req.query.contentType || 'application/octet-stream')
     const key = buildKey('documents', req.user.id, ext)
     const uploadUrl = await presignPut(key, contentType)
 
