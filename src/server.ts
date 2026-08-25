@@ -25,6 +25,8 @@ const allowedOrigin = [
   process.env.FRONTEND_URL,
   process.env.WAITLIST_URL,
   process.env.DEVELOPMENT_TEST,
+  'http://localhost:5173',
+  'http://127.0.0.1:5173',
 ].filter((origin): origin is string => Boolean(origin))
 
 // Security headers. CSP is disabled to avoid interfering with the Swagger UI
