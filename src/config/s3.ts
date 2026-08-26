@@ -1,4 +1,4 @@
-import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3'
+import { S3Client, PutObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import { randomUUID } from 'crypto'
 import dotenv from 'dotenv'
@@ -57,5 +57,5 @@ export const presignPut = async (
 export const buildKey = (folder: string, userId: string, ext: string): string =>
   `${folder}/${userId}/${randomUUID()}.${(ext || '').replace(/[^a-z0-9]/gi, '').toLowerCase() || 'bin'}`
 
-export { s3, PutObjectCommand }
+export { s3, PutObjectCommand, GetObjectCommand }
 export default s3
