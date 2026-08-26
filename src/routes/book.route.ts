@@ -12,6 +12,7 @@ import {
   getStatistics,
   updateDailyGoal,
   uploadBookFile,
+  getBookContent,
 } from '../controllers/book.controller.js'
 import { authenticate } from '../middlewares/auth.middleware.js'
 
@@ -93,6 +94,7 @@ router.post(
  *         description: Unauthorized
  */
 router.get('/', authenticate, getBooks)
+router.get('/:bookId/content', authenticate, getBookContent)
 /**
  * @swagger
  * /api/book/{bookId}:
