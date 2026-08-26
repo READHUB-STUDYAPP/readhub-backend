@@ -1,7 +1,7 @@
 import type { Request, Response } from 'express'
 import fs from 'fs/promises'
 import { createReadStream } from 'fs'
-import { s3, PutObjectCommand, S3_BUCKET, presignPut, publicUrl, buildKey } from '../config/s3.js'
+import { s3, GetObjectCommand, PutObjectCommand, S3_BUCKET, presignPut, publicUrl, buildKey } from '../config/s3.js'
 import { isStoredFileUrl } from '../utils/validators.js'
 import Book from '../models/Books.js'
 import ReadingSession from '../models/readingSession.js'
@@ -79,6 +79,34 @@ export const getBooks = async (req: Request, res: Response) => {
     return res
       .status(500)
       .json({ message: 'Error from Book API', error: errMessage(error) })
+  }
+}
+
+export const getBookContent = async (req: Request, res: Response) => {
+  try {
+    if (!req.user) return res.status(401).json({ message: 'Unauthorized' })
+
+    const book = await Book.findOne({ _id: req.params.bookId, uploadedBy: req.user.id })
+      .select('fileUrl')
+      .lean()
+    if (!book) return res.status(404).json({ message: 'Book not found' })
+
+    const marker = `/${S3_BUCKET}/`
+    const markerIndex = book.fileUrl.indexOf(marker)
+    if (markerIndex < 0) return res.status(400).json({ message: 'Invalid stored file URL' })
+    const key = book.fileUrl.slice(markerIndex + marker.length)
+    const object = await s3.send(new GetObjectCommand({ Bucket: S3_BUCKET, Key: key }))
+
+    res.setHeader('Content-Type', 'application/epub+zip')
+    res.setHeader('Content-Disposition', 'inline')
+    if (object.ContentLength !== undefined) res.setHeader('Content-Length', String(object.ContentLength))
+    const body = object.Body as unknown as { pipe?: (destination: Response) => void } | undefined
+    if (!body?.pipe) {
+      return res.status(500).json({ message: 'Stored book content is unavailable' })
+    }
+    body.pipe(res)
+  } catch (error) {
+    return res.status(500).json({ message: `Error reading book ${errMessage(error)}` })
   }
 }
 
