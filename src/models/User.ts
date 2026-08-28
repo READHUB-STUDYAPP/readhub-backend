@@ -8,7 +8,8 @@ export interface IUser extends Document {
   email: string
   password?: string
   googleId?: string
-  provider: ('local' | 'google')[]
+  appleId?: string
+  provider: ('local' | 'google' | 'apple')[]
   role: UserRole
   refreshToken?: string
   createdAt: Date
@@ -36,9 +37,10 @@ const userSchema = new Schema<IUser>(
     },
     password: { type: String },
     googleId: { type: String },
+    appleId: { type: String },
     provider: {
       type: [String],
-      enum: ['local', 'google'],
+      enum: ['local', 'google', 'apple'],
       default: ['local'],
     },
     role: {
