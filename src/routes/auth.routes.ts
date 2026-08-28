@@ -7,6 +7,7 @@ import {
   resetPassword,
   refreshToken,
   googleAuth,
+  appleAuth,
   passwordOTP,
 } from '../controllers/auth.controller.js'
 
@@ -101,6 +102,38 @@ router.post('/login', login)
  *         description: Invalid token or email not verified
  */
 router.post('/google', googleAuth)
+
+/**
+ * @openapi
+ * /api/auth/apple:
+ *   post:
+ *     tags: [Auth]
+ *     summary: Sign in with Apple
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [identityToken]
+ *             properties:
+ *               identityToken:
+ *                 type: string
+ *                 description: Identity token from Sign in with Apple
+ *               fullName:
+ *                 type: string
+ *                 description: >-
+ *                   Apple returns the name only on first authorisation and
+ *                   never again, so the client must forward it then.
+ *     responses:
+ *       200:
+ *         description: Authenticated
+ *       400:
+ *         description: Invalid token or missing email
+ *       503:
+ *         description: Apple sign-in not configured on this server
+ */
+router.post('/apple', appleAuth)
 
 /**
  * @swagger
