@@ -8,6 +8,10 @@ import {
   type TokenPayload,
 } from '../services/generateToken.js'
 import { verifyGoogleToken } from '../services/GoogleAuth.js'
+import {
+  isAppleAuthConfigured,
+  verifyAppleToken,
+} from '../services/AppleAuth.js'
 import { sendVerificationEmail } from '../services/sendVerificationEmail.js'
 import VerificationCode from '../models/Verify-user.js'
 
@@ -20,6 +24,19 @@ const errMessage = (error: unknown): string =>
  * token explicitly instead, so accept it from the body or an Authorization-style
  * header as well as the cookie. Web is unaffected and keeps using the cookie.
  */
+/**
+ * Lowercases and trims an address before it is used in a query.
+ *
+ * The schema declares `lowercase: true`, but Mongoose applies setters on write
+ * only -- never to query filters. So an account created as "John@Example.com" is
+ * stored as "john@example.com" and then `findOne({ email: "John@Example.com" })`
+ * finds nothing: the user cannot sign in with the address they signed up with,
+ * and a Google or Apple sign-in for the same person creates a second account
+ * instead of linking to the first.
+ */
+const normalizeEmail = (value: unknown): string =>
+  typeof value === 'string' ? value.trim().toLowerCase() : ''
+
 const readRefreshToken = (req: Request): string | undefined =>
   req.cookies?.refreshToken ||
   (typeof req.body?.refreshToken === 'string' ? req.body.refreshToken : undefined) ||
@@ -43,7 +60,8 @@ const wantsTokenInBody = (req: Request): boolean => {
 
 export const register = async (req: Request, res: Response) => {
   try {
-    const { username, email, password } = req.body
+    const { username, password } = req.body
+    const email = normalizeEmail(req.body.email)
     if (!username || !email || !password) {
       return res.status(400).json({ message: 'All fields are required' })
     }
@@ -84,7 +102,8 @@ export const register = async (req: Request, res: Response) => {
 
 export const login = async (req: Request, res: Response) => {
   try {
-    const { email, password } = req.body
+    const { password } = req.body
+    const email = normalizeEmail(req.body.email)
 
     if (!email || !password) {
       return res.status(400).json({ message: 'Email and password required' })
@@ -139,7 +158,8 @@ export const googleAuth = async (req: Request, res: Response) => {
       throw new Error('Invalid Google token')
     }
 
-    const { sub: googleId, email, name, email_verified } = payload
+    const { sub: googleId, name, email_verified } = payload
+    const email = normalizeEmail(payload.email)
 
     if (!email_verified) {
       return res.status(400).json({ error: 'Google email not verified' })
@@ -186,6 +206,120 @@ export const googleAuth = async (req: Request, res: Response) => {
   }
 }
 
+/**
+ * Sign in with Apple.
+ *
+ * Two things differ from Google and both matter:
+ *
+ * 1. Apple returns the user's name only on the *very first* authorisation, and
+ *    never again. The client forwards it as `fullName`; if this account is new
+ *    and it was not sent, there is no way to recover it later.
+ * 2. The address may be an Apple private relay
+ *    (`...@privaterelay.appleid.com`). It is deliverable and stable, so it is
+ *    stored as-is, but it must not be treated as the user's real address.
+ *
+ * Matching is on `sub`, not email: a user can hide their address, and a relay
+ * address is not the same string as one they may already have registered with.
+ */
+export const appleAuth = async (req: Request, res: Response) => {
+  try {
+    // Explicit and distinguishable from a bad token: the client can hide the
+    // Apple button instead of showing the user a failure it cannot act on.
+    if (!isAppleAuthConfigured()) {
+      return res
+        .status(503)
+        .json({ error: 'Apple sign-in is not configured on this server' })
+    }
+
+    const { identityToken, fullName } = req.body
+
+    if (!identityToken) {
+      return res.status(400).json({ error: 'Apple identity token required' })
+    }
+
+    const payload = await verifyAppleToken(identityToken)
+    const appleId = payload.sub
+    const email = normalizeEmail(payload.email)
+
+    // `email_verified` and `is_private_email` arrive as booleans or strings
+    // depending on the flow, so both forms are handled.
+    const emailVerified =
+      payload.email_verified === true || payload.email_verified === 'true'
+
+    let user = await User.findOne({ appleId })
+
+    // Fall back to email so a user who signed up with a password and later used
+    // Apple lands on one account instead of a duplicate.
+    if (!user && email) {
+      user = await User.findOne({ email })
+    }
+
+    if (user) {
+      if (!user.provider.includes('apple')) {
+        user.appleId = appleId
+        user.provider.push('apple')
+        await user.save()
+      }
+      if (!user.appleId) {
+        user.appleId = appleId
+        await user.save()
+      }
+    }
+
+    if (!user) {
+      if (!email) {
+        return res
+          .status(400)
+          .json({ error: 'Apple account did not provide an email address' })
+      }
+      if (!emailVerified) {
+        return res.status(400).json({ error: 'Apple email not verified' })
+      }
+
+      // Apple gives no username. Derive one and make it unique, since username
+      // is indexed and unique in the schema.
+      const base = (fullName || email.split('@')[0])
+        .toString()
+        .replace(/[^a-zA-Z0-9]/g, '')
+        .toLowerCase()
+        .slice(0, 20)
+
+      let username = base || `reader${Date.now().toString().slice(-6)}`
+      if (await User.findOne({ username })) {
+        username = `${username}${Date.now().toString().slice(-4)}`
+      }
+
+      user = await User.create({
+        email,
+        username,
+        appleId,
+        provider: ['apple'],
+      })
+    }
+
+    const accessToken = generateAccessToken({ id: user._id })
+    const refreshToken = generateRefreshToken({ id: user._id })
+
+    await User.updateOne({ _id: user._id }, { $set: { refreshToken } })
+
+    res.cookie('refreshToken', refreshToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
+    })
+
+    return res.status(200).json({
+      message: 'Apple authentication successful',
+      accessToken,
+      ...(wantsTokenInBody(req) ? { refreshToken } : {}),
+    })
+  } catch (err) {
+    return res
+      .status(400)
+      .json({ error: 'Apple authentication failed', detail: errMessage(err) })
+  }
+}
+
 export const refreshToken = async (req: Request, res: Response) => {
   try {
     const refreshToken = readRefreshToken(req)
@@ -229,7 +363,7 @@ export const logout = async (req: Request, res: Response) => {
 
 export const passwordOTP = async (req: Request, res: Response) => {
   try {
-    const { email } = req.body
+    const email = normalizeEmail(req.body.email)
 
     if (!email) {
       return res.status(409).json({ message: 'Email is required' })
@@ -257,7 +391,8 @@ export const passwordOTP = async (req: Request, res: Response) => {
 
 export const resetPassword = async (req: Request, res: Response) => {
   try {
-    const { email, password, code } = req.body
+    const { password, code } = req.body
+    const email = normalizeEmail(req.body.email)
 
     if (!email || !password || !code) {
       return res
