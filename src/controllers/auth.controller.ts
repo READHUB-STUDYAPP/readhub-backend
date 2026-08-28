@@ -14,6 +14,33 @@ import VerificationCode from '../models/Verify-user.js'
 const errMessage = (error: unknown): string =>
   error instanceof Error ? error.message : String(error)
 
+/**
+ * Native apps cannot use the httpOnly refresh cookie: there is no cookie jar to
+ * read it from, and nothing persists it across launches. They send the refresh
+ * token explicitly instead, so accept it from the body or an Authorization-style
+ * header as well as the cookie. Web is unaffected and keeps using the cookie.
+ */
+const readRefreshToken = (req: Request): string | undefined =>
+  req.cookies?.refreshToken ||
+  (typeof req.body?.refreshToken === 'string' ? req.body.refreshToken : undefined) ||
+  (typeof req.headers['x-refresh-token'] === 'string'
+    ? (req.headers['x-refresh-token'] as string)
+    : undefined)
+
+/**
+ * Whether to return the refresh token in the response body.
+ *
+ * Only for clients that identify themselves as native. Returning it
+ * unconditionally would hand the web app a token in JS-readable form and undo
+ * the point of the httpOnly cookie.
+ */
+const wantsTokenInBody = (req: Request): boolean => {
+  const client = req.headers['x-client-platform']
+  return (
+    typeof client === 'string' && ['ios', 'android', 'mobile'].includes(client.toLowerCase())
+  )
+}
+
 export const register = async (req: Request, res: Response) => {
   try {
     const { username, email, password } = req.body
@@ -93,6 +120,7 @@ export const login = async (req: Request, res: Response) => {
       message: 'Login successful',
       accessToken,
       role: user.role,
+      ...(wantsTokenInBody(req) ? { refreshToken } : {}),
     })
   } catch (err) {
     return res.status(500).json({ message: 'Login failed' })
@@ -151,6 +179,7 @@ export const googleAuth = async (req: Request, res: Response) => {
     return res.status(200).json({
       message: 'Google authentication successful',
       accessToken,
+      ...(wantsTokenInBody(req) ? { refreshToken } : {}),
     })
   } catch (err) {
     return res.status(500).json({ error: 'Google authentication failed' })
@@ -159,7 +188,7 @@ export const googleAuth = async (req: Request, res: Response) => {
 
 export const refreshToken = async (req: Request, res: Response) => {
   try {
-    const refreshToken = req.cookies?.refreshToken
+    const refreshToken = readRefreshToken(req)
     if (!refreshToken)
       return res.status(401).json({ message: 'Refresh token missing' })
 
@@ -186,7 +215,7 @@ export const refreshToken = async (req: Request, res: Response) => {
 
 export const logout = async (req: Request, res: Response) => {
   try {
-    const refreshToken = req.cookies?.refreshToken
+    const refreshToken = readRefreshToken(req)
     if (!refreshToken) {
       return res.status(401).json({ message: 'Refresh token missing' })
     }
