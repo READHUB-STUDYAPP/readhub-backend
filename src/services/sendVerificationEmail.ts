@@ -1,8 +1,17 @@
+import { randomInt } from 'node:crypto'
 import VerificationCode from '../models/Verify-user.js'
 import { sendEmail, type SendResult } from './email.js'
 
+/**
+ * Six-digit password-reset code.
+ *
+ * randomInt, not Math.random: Math.random is a non-cryptographic PRNG whose
+ * output is predictable from previous values, and this code is the only thing
+ * standing between an attacker and a password reset. Same reasoning the admin
+ * invite flow already follows with randomBytes.
+ */
 function generateCode(): string {
-  return Math.floor(100000 + Math.random() * 900000).toString()
+  return randomInt(100000, 1000000).toString()
 }
 
 export async function sendVerificationEmail(
