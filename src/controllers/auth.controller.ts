@@ -114,8 +114,22 @@ export const login = async (req: Request, res: Response) => {
       return res.status(400).json({ message: 'Invalid email or password' })
     }
 
-    if (!user.password || !user.provider.includes('local')) {
-      return res.status(400).json({ message: 'Login with Google' })
+    if (!user.password) {
+      // No password has ever been set, so this account can only be reached
+      // through the provider that created it. Name that provider rather than
+      // assuming Google -- Apple sign-in reaches this branch too.
+      //
+      // Presence of a password is the whole test. Requiring 'local' in provider
+      // as well used to lock out anyone who set a password through the reset
+      // flow before that flow recorded it, and a verified reset already proves
+      // ownership of the address.
+      const social = user.provider.filter((p) => p !== 'local')
+      const names = social.map((p) => (p === 'apple' ? 'Apple' : 'Google'))
+      return res.status(400).json({
+        message: names.length
+          ? `Login with ${names.join(' or ')}`
+          : 'Invalid email or password',
+      })
     }
 
     const isMatch = await bcrypt.compare(password, user.password)
@@ -417,7 +431,18 @@ export const resetPassword = async (req: Request, res: Response) => {
     }
 
     const hashedPassword = await bcrypt.hash(password, 12)
-    await User.updateOne({ email }, { $set: { password: hashedPassword } })
+    // Setting a password through the code-verified reset flow *is* creating
+    // local credentials, so the provider list has to say so. Without this an
+    // account created through Google gets a password it can never use: login
+    // also requires 'local' in provider, and nothing else ever adds it.
+    // Written in the same update as the password so the two cannot diverge.
+    await User.updateOne(
+      { email },
+      {
+        $set: { password: hashedPassword },
+        $addToSet: { provider: 'local' },
+      },
+    )
 
     // Consume the code so it cannot be reused.
     await VerificationCode.deleteOne({ _id: verificationRecord._id })
