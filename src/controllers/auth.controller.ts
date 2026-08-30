@@ -100,6 +100,13 @@ export const register = async (req: Request, res: Response) => {
   }
 }
 
+/**
+ * Signed-in devices kept per user. Beyond this the oldest is dropped, which
+ * signs that device out -- a bound is needed because a token is added on every
+ * sign-in and only removed on an explicit logout.
+ */
+const MAX_SESSIONS = 10
+
 export const login = async (req: Request, res: Response) => {
   try {
     const { password } = req.body
@@ -141,7 +148,13 @@ export const login = async (req: Request, res: Response) => {
 
     const refreshToken = generateRefreshToken({ id: user._id })
 
-    await User.updateOne({ _id: user._id }, { $set: { refreshToken } })
+    await User.updateOne({ _id: user._id }, {
+      // Recorded per device. `$set` on a single field meant the newest sign-in
+      // silently invalidated every other one, so using the web logged the phone
+      // out at its next refresh. `$slice` bounds the list so it cannot grow
+      // without limit as a user signs in over the years.
+      $push: { refreshTokens: { $each: [refreshToken], $slice: -MAX_SESSIONS } },
+    })
 
     res.cookie('refreshToken', refreshToken, {
       httpOnly: true,
@@ -202,7 +215,13 @@ export const googleAuth = async (req: Request, res: Response) => {
 
     const refreshToken = generateRefreshToken({ id: user._id })
 
-    await User.updateOne({ _id: user._id }, { $set: { refreshToken } })
+    await User.updateOne({ _id: user._id }, {
+      // Recorded per device. `$set` on a single field meant the newest sign-in
+      // silently invalidated every other one, so using the web logged the phone
+      // out at its next refresh. `$slice` bounds the list so it cannot grow
+      // without limit as a user signs in over the years.
+      $push: { refreshTokens: { $each: [refreshToken], $slice: -MAX_SESSIONS } },
+    })
 
     res.cookie('refreshToken', refreshToken, {
       httpOnly: true,
@@ -314,7 +333,13 @@ export const appleAuth = async (req: Request, res: Response) => {
     const accessToken = generateAccessToken({ id: user._id })
     const refreshToken = generateRefreshToken({ id: user._id })
 
-    await User.updateOne({ _id: user._id }, { $set: { refreshToken } })
+    await User.updateOne({ _id: user._id }, {
+      // Recorded per device. `$set` on a single field meant the newest sign-in
+      // silently invalidated every other one, so using the web logged the phone
+      // out at its next refresh. `$slice` bounds the list so it cannot grow
+      // without limit as a user signs in over the years.
+      $push: { refreshTokens: { $each: [refreshToken], $slice: -MAX_SESSIONS } },
+    })
 
     res.cookie('refreshToken', refreshToken, {
       httpOnly: true,
@@ -340,7 +365,11 @@ export const refreshToken = async (req: Request, res: Response) => {
     if (!refreshToken)
       return res.status(401).json({ message: 'Refresh token missing' })
 
-    const tokenExists = await User.findOne({ refreshToken })
+    // Either store: `refreshToken` holds sessions issued before this became a
+    // list, and they should keep working rather than being signed out on deploy.
+    const tokenExists = await User.findOne({
+      $or: [{ refreshTokens: refreshToken }, { refreshToken }],
+    })
     if (!tokenExists)
       return res.status(403).json({ message: 'Invalid refresh token' })
 
@@ -367,7 +396,12 @@ export const logout = async (req: Request, res: Response) => {
     if (!refreshToken) {
       return res.status(401).json({ message: 'Refresh token missing' })
     }
-    await User.updateOne({ refreshToken }, { $unset: { refreshToken: 1 } })
+    // Ends this device's session only. Clearing every token would sign the
+    // user out of their other devices as a side effect of logging out here.
+    await User.updateOne(
+      { $or: [{ refreshTokens: refreshToken }, { refreshToken }] },
+      { $pull: { refreshTokens: refreshToken }, $unset: { refreshToken: 1 } },
+    )
     res.clearCookie('refreshToken')
     res.json({ message: 'User logged out successfully' })
   } catch (error) {
