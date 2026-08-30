@@ -11,7 +11,11 @@ export interface IUser extends Document {
   appleId?: string
   provider: ('local' | 'google' | 'apple')[]
   role: UserRole
+  /** @deprecated Superseded by refreshTokens; kept so sessions issued before
+   * the change keep working until they expire. */
   refreshToken?: string
+  /** One entry per signed-in device. */
+  refreshTokens: string[]
   createdAt: Date
   updatedAt: Date
 }
@@ -47,6 +51,14 @@ const userSchema = new Schema<IUser>(
       type: String,
       enum: ['user', 'admin'],
       default: 'user',
+      index: true,
+    },
+    // One token per signed-in device. A single field meant each login
+    // overwrote the last, so signing in on the web silently invalidated the
+    // phone's session and the next refresh there logged the user out.
+    refreshTokens: {
+      type: [String],
+      default: [],
       index: true,
     },
     refreshToken: {
