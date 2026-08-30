@@ -39,9 +39,34 @@ router.use(authenticate)
  *               pageNumber:
  *                 type: number
  *                 example: 25
+ *               highlight:
+ *                 type: object
+ *                 description: >
+ *                   Present when the note came from highlighting a passage, so
+ *                   the reader can paint it again on a later visit or on
+ *                   another device. Offsets are character positions in the
+ *                   page's extracted text and are optional; `text` is the
+ *                   fallback anchor when they cannot be computed or no longer
+ *                   apply.
+ *                 required:
+ *                   - text
+ *                 properties:
+ *                   text:
+ *                     type: string
+ *                     example: Habits are the compound interest of self-improvement.
+ *                   color:
+ *                     type: string
+ *                     default: yellow
+ *                     example: "#F5A623"
+ *                   startOffset:
+ *                     type: integer
+ *                     example: 1042
+ *                   endOffset:
+ *                     type: integer
+ *                     example: 1096
  *     responses:
  *       201:
- *         description: Note created successfully
+ *         description: Note created successfully, returned as `note`
  *       400:
  *         description: Invalid input
  *       401:
@@ -59,6 +84,19 @@ router.post('/', createNote)
  *     tags: [Notes]
  *     security:
  *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: bookId
+ *         schema:
+ *           type: string
+ *         description: Only notes on this book.
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *         description: >
+ *           Only notes on this page. The reader asks for one page at a time on
+ *           every page turn.
  *     responses:
  *       200:
  *         description: List of user's notes
