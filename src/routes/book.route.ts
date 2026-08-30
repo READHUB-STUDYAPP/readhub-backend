@@ -255,6 +255,15 @@ router.post('/start', authenticate, startReading)
  *                 type: number
  *                 description: The page where the user stopped reading
  *                 example: 120
+ *               durationMinutes:
+ *                 type: integer
+ *                 description: >
+ *                   Minutes the client measured as actually read, excluding any
+ *                   time the app spent in the background. Optional, and clamped
+ *                   to the elapsed wall clock since pauses can only subtract.
+ *                   Omit it and the server falls back to end time minus start
+ *                   time, which counts a session left open behind a lock screen.
+ *                 example: 12
  *     responses:
  *       200:
  *         description: Reading session ended successfully

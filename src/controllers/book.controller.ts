@@ -252,7 +252,7 @@ export const startReading = async (req: Request, res: Response) => {
 
 export const endReading = async (req: Request, res: Response) => {
   try {
-    const { sessionId, endPage } = req.body
+    const { sessionId, endPage, durationMinutes } = req.body
     const userId = req.user!.id
 
     // Scope to the requesting user so one user cannot end/alter another's session.
@@ -270,8 +270,21 @@ export const endReading = async (req: Request, res: Response) => {
     const endTime = new Date()
     session.endTime = endTime
 
-    const duration = (endTime.getTime() - session.startTime.getTime()) / 1000 / 60
-    const durationMin = Math.round(duration)
+    // Wall clock from start to now. This is an upper bound on reading, not a
+    // measure of it: it counts every minute the reader sat in the background or
+    // behind a locked screen.
+    const elapsed = (endTime.getTime() - session.startTime.getTime()) / 1000 / 60
+    const elapsedMin = Math.round(elapsed)
+
+    // A client that tracks foreground time can report what was actually read.
+    // It is trusted only to report *less*: pauses can only subtract, so a value
+    // above the elapsed wall clock is impossible and is clamped rather than
+    // believed. Without a client figure the wall clock stands, as before.
+    const reported = Number(durationMinutes)
+    const durationMin =
+      Number.isFinite(reported) && reported >= 0
+        ? Math.min(Math.round(reported), elapsedMin)
+        : elapsedMin
     session.duration = durationMin
     session.endPage = endPage
     session.pagesRead = endPage - session.startPage!
