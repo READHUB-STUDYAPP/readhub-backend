@@ -19,6 +19,21 @@ const errMessage = (error: unknown): string =>
   error instanceof Error ? error.message : String(error)
 
 /**
+ * Refresh-cookie Max-Age in milliseconds, derived from the same
+ * REFRESH_TOKEN_EXPIRES_IN that sets the refresh JWT's lifetime, so the cookie
+ * and the token it carries never drift. Without an explicit maxAge the browser
+ * treats it as a session cookie and drops it on close — even though the token
+ * inside is still valid — so web sessions would not survive a browser restart.
+ * Accepts a duration like `7d`, `12h`, `30m`, `45s`; defaults to 7 days.
+ */
+const refreshCookieMaxAgeMs = (): number => {
+  const raw = (process.env.REFRESH_TOKEN_EXPIRES_IN ?? '7d').trim()
+  const match = /^(\d+)\s*([smhd])$/.exec(raw)
+  const units: Record<string, number> = { s: 1000, m: 60_000, h: 3_600_000, d: 86_400_000 }
+  return match ? Number(match[1]) * units[match[2]] : 7 * 86_400_000
+}
+
+/**
  * Native apps cannot use the httpOnly refresh cookie: there is no cookie jar to
  * read it from, and nothing persists it across launches. They send the refresh
  * token explicitly instead, so accept it from the body or an Authorization-style
@@ -160,6 +175,7 @@ export const login = async (req: Request, res: Response) => {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'strict',
+      maxAge: refreshCookieMaxAgeMs(),
     })
 
     return res.status(200).json({
@@ -227,6 +243,7 @@ export const googleAuth = async (req: Request, res: Response) => {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'strict',
+      maxAge: refreshCookieMaxAgeMs(),
     })
 
     return res.status(200).json({
@@ -345,6 +362,7 @@ export const appleAuth = async (req: Request, res: Response) => {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'strict',
+      maxAge: refreshCookieMaxAgeMs(),
     })
 
     return res.status(200).json({
