@@ -10,6 +10,10 @@ export interface IBook extends Document {
   uploadedBy: Types.ObjectId
   lastPageRead: number
   status: BookStatus
+  /** Opt-in: shared with every reader, and eligible for Trending. */
+  isPublic: boolean
+  /** Set when this copy came from another reader's public book. */
+  sourceBookId?: Types.ObjectId
   createdAt: Date
   updatedAt: Date
 }
@@ -43,6 +47,20 @@ const bookSchema = new Schema<IBook>(
     lastPageRead: {
       type: Number,
       default: 0,
+    },
+    // Off unless the uploader turns it on. A book is someone's document until
+    // they say otherwise, so sharing is never a default and never implicit.
+    isPublic: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+    // Which public book this was taken from, so a reader is not offered a title
+    // they already have, and so the original can be credited.
+    sourceBookId: {
+      type: Schema.Types.ObjectId,
+      ref: 'Book',
+      index: true,
     },
     status: {
       type: String,

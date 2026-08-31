@@ -13,6 +13,7 @@ import userProfile from './routes/userProfile.route.js'
 import cloudinaryRoutes from './routes/cloudinary-uploads.route.js'
 import waitList from './routes/waitlist.route.js'
 import bookRoutes from './routes/book.route.js'
+import discoverRoutes from './routes/discover.route.js'
 import noteRoutes from './routes/notes.route.js'
 import adminRoutes from './routes/admin.route.js'
 
@@ -57,6 +58,7 @@ app.use('/api/cloudinary-signature', cloudinaryRoutes)
 app.use('/api/waitlist', waitList)
 app.use('/api/book', bookRoutes)
 app.use('/api/notes', noteRoutes)
+app.use('/api/discover', discoverRoutes)
 app.use('/api/admin', adminRoutes)
 
 const PORT = process.env.PORT || 5000
