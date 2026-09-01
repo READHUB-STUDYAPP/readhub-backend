@@ -52,6 +52,13 @@ const readingSessionSchema = new Schema<IReadingSession>(
   { timestamps: true },
 )
 
+// The stats endpoint asks for one user's sessions within a date range, and the
+// reader screen asks for their one open session. Neither had an index to use,
+// so both scanned every session ever recorded -- fine at a hundred users and
+// not at ten thousand.
+readingSessionSchema.index({ user: 1, endTime: -1 })
+readingSessionSchema.index({ user: 1, book: 1, endTime: 1 })
+
 const ReadingSession: Model<IReadingSession> =
   mongoose.model<IReadingSession>('ReadingSession', readingSessionSchema)
 
