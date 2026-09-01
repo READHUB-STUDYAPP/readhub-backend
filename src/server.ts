@@ -15,6 +15,7 @@ import waitList from './routes/waitlist.route.js'
 import bookRoutes from './routes/book.route.js'
 import noteRoutes from './routes/notes.route.js'
 import adminRoutes from './routes/admin.route.js'
+import groupRoutes from './routes/group.route.js'
 
 dotenv.config()
 
@@ -58,6 +59,7 @@ app.use('/api/waitlist', waitList)
 app.use('/api/book', bookRoutes)
 app.use('/api/notes', noteRoutes)
 app.use('/api/admin', adminRoutes)
+app.use('/api/groups', groupRoutes)
 
 const PORT = process.env.PORT || 5000
 
