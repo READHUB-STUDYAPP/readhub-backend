@@ -120,7 +120,15 @@ export const updateBookProgress = async (req: Request, res: Response) => {
       return res.status(404).json({ message: 'Book not found' })
     }
     if (lastPageRead !== undefined) {
-      book.lastPageRead = lastPageRead
+      // The furthest page wins. The same book may be read on the web and on a
+      // phone that was offline, and whichever syncs last would otherwise drag
+      // the other backwards -- a reader watching their progress undo itself.
+      // Going back to re-read is still possible; it just is not synced as a
+      // loss of progress.
+      const incoming = Number(lastPageRead)
+      if (Number.isFinite(incoming)) {
+        book.lastPageRead = Math.max(incoming, Number(book.lastPageRead) || 0)
+      }
     }
     if (status) {
       book.status = status
@@ -182,6 +190,9 @@ export const deleteBook = async (req: Request, res: Response) => {
 export const startReading = async (req: Request, res: Response) => {
   try {
     const { bookId, startPage } = req.body
+    // When the reading actually began. Present for a session recorded offline
+    // and replayed later; absent for one happening right now.
+    const startedAt = clientTime(req.body?.startTime, new Date())
 
     // Reuse only an "open" session; otherwise create a new one (keeps history for stats/graphs).
     let readingBook = await ReadingSession.findOne({
@@ -194,17 +205,19 @@ export const startReading = async (req: Request, res: Response) => {
       readingBook = await ReadingSession.create({
         user: req.user!.id,
         book: bookId,
-        startTime: new Date(),
+        startTime: startedAt,
         startPage,
       })
     } else {
       readingBook.startPage = startPage
-      readingBook.startTime = new Date()
+      readingBook.startTime = startedAt
       await readingBook.save()
     }
 
-    // Update streak on "start reading" (counts as reading for the day)
-    const now = new Date()
+    // Update streak on "start reading" (counts as reading for the day). The
+    // day is the one the reading happened on, which for a session replayed
+    // from a phone's offline queue is not necessarily today.
+    const now = startedAt
     const todayStart = new Date(now)
     todayStart.setHours(0, 0, 0, 0)
     const todayStartTime = todayStart.getTime()
@@ -267,13 +280,15 @@ export const endReading = async (req: Request, res: Response) => {
       return res.json(session)
     }
 
-    const endTime = new Date()
-    session.endTime = endTime
+    // The session's own start is the floor: an end before it would produce
+    // negative minutes.
+    const endTime = clientTime(req.body?.endTime, new Date())
+    session.endTime = endTime < session.startTime ? new Date() : endTime
 
     // Wall clock from start to now. This is an upper bound on reading, not a
     // measure of it: it counts every minute the reader sat in the background or
     // behind a locked screen.
-    const elapsed = (endTime.getTime() - session.startTime.getTime()) / 1000 / 60
+    const elapsed = (session.endTime.getTime() - session.startTime.getTime()) / 1000 / 60
     const elapsedMin = Math.round(elapsed)
 
     // A client that tracks foreground time can report what was actually read.
@@ -291,8 +306,9 @@ export const endReading = async (req: Request, res: Response) => {
 
     await session.save()
 
-    // UPDATE USER STATS
-    const today = new Date()
+    // UPDATE USER STATS, against the day the reading happened rather than the
+    // day it reached the server.
+    const today = new Date(session.endTime)
     today.setHours(0, 0, 0, 0)
 
     let stats = await UserStats.findOne({ user: userId })
@@ -421,6 +437,34 @@ export const getStatistics = async (req: Request, res: Response) => {
       error: errMessage(error),
     })
   }
+}
+
+/**
+ * A timestamp a client says something happened at.
+ *
+ * Sessions read offline are replayed when the phone finds a network, sometimes
+ * a day later, and they belong to the day they were read -- otherwise the
+ * readers who read most, on the worst connections, are the ones whose streaks
+ * break.
+ *
+ * The clock is the phone's, so it is believed only within limits: nothing in
+ * the future, and nothing older than a few days. Outside that window the
+ * server's own clock is used, which records the reading without letting a
+ * wrong or deliberately altered clock rewrite history.
+ */
+const CLIENT_TIME_WINDOW_MS = 3 * 24 * 60 * 60 * 1000
+
+function clientTime(value: unknown, fallback: Date): Date {
+  if (typeof value !== 'string') return fallback
+
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.getTime())) return fallback
+
+  const now = Date.now()
+  if (parsed.getTime() > now) return fallback
+  if (now - parsed.getTime() > CLIENT_TIME_WINDOW_MS) return fallback
+
+  return parsed
 }
 
 export const updateDailyGoal = async (req: Request, res: Response) => {
