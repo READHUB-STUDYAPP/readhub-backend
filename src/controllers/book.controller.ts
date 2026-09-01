@@ -388,11 +388,6 @@ export const getStatistics = async (req: Request, res: Response) => {
     const dailyGoal = userStats?.dailyReadingGoal || 30
     const weekMinutes = Array.from({ length: 7 }, () => 0)
 
-    const lastReadingStartTime = userStats?.lastReadingDate
-      ? new Date(userStats.lastReadingDate).setHours(0, 0, 0, 0)
-      : null
-    const goalLockedToday = lastReadingStartTime === localTodayStartTime
-
     ;(weekSessions || []).forEach((s) => {
       if (!s?.endTime) return
       const d = new Date(s.endTime)
@@ -404,7 +399,6 @@ export const getStatistics = async (req: Request, res: Response) => {
 
     res.status(200).json({
       dailyGoal,
-      goalLockedToday,
       todayReadingMinutes: userStats?.todayReadingMinutes || 0,
       totalHoursRead: Number(
         ((userStats?.totalMinutesRead || 0) / 60).toFixed(1),
@@ -440,20 +434,16 @@ export const updateDailyGoal = async (req: Request, res: Response) => {
       (await UserStats.findOne({ user: userId })) ||
       (await UserStats.create({ user: userId }))
 
-    const todayStart = new Date()
-    todayStart.setHours(0, 0, 0, 0)
-    const todayStartTime = todayStart.getTime()
-    const lastStartTime = stats.lastReadingDate
-      ? new Date(stats.lastReadingDate).setHours(0, 0, 0, 0)
-      : null
-
-    // Once a user has started reading for the day, lock the reading goal until the next day.
-    if (lastStartTime === todayStartTime) {
-      return res.status(403).json({
-        message: 'Daily reading goal is locked until tomorrow',
-      })
-    }
-
+    // The goal is editable at any time.
+    //
+    // It used to lock for the rest of the day as soon as a session started, and
+    // `lastReadingDate` is set by `startReading` on every session -- so anyone
+    // who read daily could never change their goal again. The only day it could
+    // be edited was a day they had not read at all.
+    //
+    // Nothing depended on the lock: the streak counts days with any reading at
+    // all, not days the goal was met, so there was no target to game by moving
+    // it. It only stopped people setting a target that suited them.
     stats.dailyReadingGoal = Math.round(dailyGoal)
     await stats.save()
 
