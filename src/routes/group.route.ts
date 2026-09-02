@@ -12,6 +12,12 @@ import {
   setTarget,
   setVisibility,
 } from '../controllers/group.controller.js'
+import {
+  createMessage,
+  deleteMessage,
+  editMessage,
+  listMessages,
+} from '../controllers/groupMessage.controller.js'
 import { authenticate } from '../middlewares/auth.middleware.js'
 
 const router = express.Router()
@@ -34,5 +40,12 @@ router.post('/:groupId/books', addBook)
 router.delete('/:groupId/books/:bookId', removeBook)
 router.post('/:groupId/schedule', setTarget)
 router.put('/:groupId/progress', recordProgress)
+
+// Comments. A conversation is private to the group, and every one of these
+// checks membership before it reads or writes anything.
+router.get('/:groupId/messages', listMessages)
+router.post('/:groupId/messages', createMessage)
+router.patch('/:groupId/messages/:messageId', editMessage)
+router.delete('/:groupId/messages/:messageId', deleteMessage)
 
 export default router
