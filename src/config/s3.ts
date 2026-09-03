@@ -21,7 +21,27 @@ const forcePathStyle = (process.env.S3_FORCE_PATH_STYLE ?? 'true') !== 'false'
 
 // Server-side client: talks to MinIO over the private container network
 // (S3_ENDPOINT=http://minio:9000) for direct uploads/reads from the backend.
-const s3 = new S3Client({ endpoint: process.env.S3_ENDPOINT, region, credentials, forcePathStyle })
+//
+// The checksum settings are not optional here, and are the same two the
+// presign client below needs. Left at their defaults, the SDK adds
+// `x-amz-checksum-mode: ENABLED` to every GetObject *and lists it among the
+// signed headers*. Anything between us and MinIO that drops that header -- a
+// proxy, an older gateway -- leaves MinIO recomputing the signature over a set
+// of headers that no longer matches, and it answers "The request signature we
+// calculated does not match the signature you provided", which reads as a
+// credentials problem and is not one. That is what stopped a reader opening an
+// EPUB: the download 500'd with a message about signing keys.
+//
+// Verified rather than assumed: with the defaults the SDK sends and signs that
+// header; with WHEN_REQUIRED it sends neither.
+const s3 = new S3Client({
+  endpoint: process.env.S3_ENDPOINT,
+  region,
+  credentials,
+  forcePathStyle,
+  requestChecksumCalculation: 'WHEN_REQUIRED',
+  responseChecksumValidation: 'WHEN_REQUIRED',
+})
 
 // Presign client: MUST sign against the PUBLIC endpoint the browser will hit
 // (S3_PUBLIC_URL=https://files.<env>.readhub.study), otherwise the presigned URL
