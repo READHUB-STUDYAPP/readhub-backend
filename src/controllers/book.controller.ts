@@ -94,7 +94,11 @@ export const getBookContent = async (req: Request, res: Response) => {
     const marker = `/${S3_BUCKET}/`
     const markerIndex = book.fileUrl.indexOf(marker)
     if (markerIndex < 0) return res.status(400).json({ message: 'Invalid stored file URL' })
-    const key = book.fileUrl.slice(markerIndex + marker.length)
+
+    // The key is a path, and a stored URL may still carry a query string --
+    // a cache-buster, or the remains of a presigned link. Signing that as part
+    // of the object's name asks storage for a key that does not exist.
+    const key = decodeURIComponent(book.fileUrl.slice(markerIndex + marker.length).split('?')[0])
     const object = await s3.send(new GetObjectCommand({ Bucket: S3_BUCKET, Key: key }))
 
     res.setHeader('Content-Type', 'application/epub+zip')
@@ -106,7 +110,16 @@ export const getBookContent = async (req: Request, res: Response) => {
     }
     body.pipe(res)
   } catch (error) {
-    return res.status(500).json({ message: `Error reading book ${errMessage(error)}` })
+    // Logged in full, answered plainly. This used to return the storage
+    // provider's own words, so a reader trying to open a book was shown "The
+    // request signature we calculated does not match the signature you
+    // provided. Check your key and signing method." -- which tells them
+    // nothing they can act on and describes our infrastructure to them.
+    console.error('[getBookContent] failed', {
+      bookId: req.params.bookId,
+      error: errMessage(error),
+    })
+    return res.status(500).json({ message: 'This book could not be opened right now.' })
   }
 }
 
