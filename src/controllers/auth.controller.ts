@@ -34,6 +34,37 @@ const refreshCookieMaxAgeMs = (): number => {
 }
 
 /**
+ * How the refresh cookie is scoped.
+ *
+ * `strict` looks like the safe answer and quietly breaks the session: the app
+ * and the API are on different hosts, and a browser will not send a strict
+ * cookie on a request to another origin. The web client therefore asked to
+ * renew its access token and sent nothing to renew it with, so every reader
+ * was signed out a quarter of an hour after signing in -- and a developer
+ * running the app locally against a deployed API never stayed signed in at
+ * all.
+ *
+ * `none` is what a cookie shared between an app and an API on separate hosts
+ * has to be, and it requires `secure`. What it gives away is small and already
+ * covered: another site can cause a browser to call this endpoint, but CORS
+ * only returns the response to origins we name, so it cannot read the token it
+ * asks for, and the endpoint changes nothing on its own.
+ *
+ * Over plain HTTP -- a backend running locally -- `none` would be rejected for
+ * lacking `secure`, so `lax` is used there instead.
+ */
+const refreshCookieOptions = () => {
+  const overHttps = process.env.NODE_ENV === 'production'
+
+  return {
+    httpOnly: true,
+    secure: overHttps,
+    sameSite: (overHttps ? 'none' : 'lax') as 'none' | 'lax',
+    maxAge: refreshCookieMaxAgeMs(),
+  }
+}
+
+/**
  * Native apps cannot use the httpOnly refresh cookie: there is no cookie jar to
  * read it from, and nothing persists it across launches. They send the refresh
  * token explicitly instead, so accept it from the body or an Authorization-style
@@ -172,10 +203,7 @@ export const login = async (req: Request, res: Response) => {
     })
 
     res.cookie('refreshToken', refreshToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
-      maxAge: refreshCookieMaxAgeMs(),
+      ...refreshCookieOptions(),
     })
 
     return res.status(200).json({
@@ -240,10 +268,7 @@ export const googleAuth = async (req: Request, res: Response) => {
     })
 
     res.cookie('refreshToken', refreshToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
-      maxAge: refreshCookieMaxAgeMs(),
+      ...refreshCookieOptions(),
     })
 
     return res.status(200).json({
@@ -359,10 +384,7 @@ export const appleAuth = async (req: Request, res: Response) => {
     })
 
     res.cookie('refreshToken', refreshToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
-      maxAge: refreshCookieMaxAgeMs(),
+      ...refreshCookieOptions(),
     })
 
     return res.status(200).json({
