@@ -21,7 +21,25 @@ const forcePathStyle = (process.env.S3_FORCE_PATH_STYLE ?? 'true') !== 'false'
 
 // Server-side client: talks to MinIO over the private container network
 // (S3_ENDPOINT=http://minio:9000) for direct uploads/reads from the backend.
-const s3 = new S3Client({ endpoint: process.env.S3_ENDPOINT, region, credentials, forcePathStyle })
+//
+// The checksum settings match the presign client's. They are not what fixed
+// the "SignatureDoesNotMatch" failures this comment used to claim -- that was
+// DNS: `minio` resolved round-robin across both environments on the shared
+// edge network, so half of these calls went to the other environment's MinIO,
+// which rejects them because the credentials differ. Fixed in readhub-infra by
+// addressing the container by name.
+//
+// They stay because they are still correct: they keep this client's requests
+// identical in shape to the presigned ones, and MinIO rejected the SDK's
+// default checksum behaviour on the upload side.
+const s3 = new S3Client({
+  endpoint: process.env.S3_ENDPOINT,
+  region,
+  credentials,
+  forcePathStyle,
+  requestChecksumCalculation: 'WHEN_REQUIRED',
+  responseChecksumValidation: 'WHEN_REQUIRED',
+})
 
 // Presign client: MUST sign against the PUBLIC endpoint the browser will hit
 // (S3_PUBLIC_URL=https://files.<env>.readhub.study), otherwise the presigned URL
