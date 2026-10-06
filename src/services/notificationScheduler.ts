@@ -6,6 +6,7 @@ import Reminder from '../models/reminder.js'
 import User from '../models/User.js'
 import { sendEmail } from './email.js'
 import { dateStampIn, deliver, escapeHtml, notify, preferencesFor } from './notification.service.js'
+import { runBuddyAccountability } from './buddyAccountability.js'
 
 /**
  * The clock behind notifications.
@@ -62,6 +63,7 @@ export async function tick(now = new Date()): Promise<void> {
     await deliverDue(now)
     await fireReadingReminders(now)
     await runDailyEmailTracks(now)
+    await runDailyBuddySweep(now)
   } catch (error) {
     console.error('[notifications] tick failed', error)
   } finally {
@@ -170,6 +172,18 @@ async function runDailyEmailTracks(now: Date): Promise<void> {
 
   await sendInactivityNudges(now)
   await sendFortnightlyResume(now)
+}
+
+/**
+ * The Reading Buddy sweeps, an hour after the email tracks.
+ *
+ * Deliberately not the same hour: both walk a lot of rows, and there is no
+ * reason to make one minute of the day carry all of it.
+ */
+async function runDailyBuddySweep(now: Date): Promise<void> {
+  if (now.getUTCHours() !== 10 || now.getUTCMinutes() !== 0) return
+
+  await runBuddyAccountability(now)
 }
 
 /**
