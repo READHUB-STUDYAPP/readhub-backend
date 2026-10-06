@@ -137,11 +137,26 @@ export const joinChallenge = async (req: Request, res: Response) => {
     })
     if (existing) return res.json(existing)
 
-    const participant = await ChallengeParticipant.create({
-      challenge: challengeId,
-      community: communityId,
-      user: req.user.id,
-    })
+    // Same race as joining a community: the unique index decides, and losing
+    // it means someone already joined on this caller's behalf.
+    let participant
+    try {
+      participant = await ChallengeParticipant.create({
+        challenge: challengeId,
+        community: communityId,
+        user: req.user.id,
+      })
+    } catch (error) {
+      if ((error as { code?: number }).code === 11000) {
+        const already = await ChallengeParticipant.findOne({
+          challenge: challengeId,
+          user: req.user.id,
+        })
+        return res.json(already)
+      }
+      throw error
+    }
+
     await Challenge.updateOne({ _id: challengeId }, { $inc: { participantCount: 1 } })
 
     const user = await User.findById(req.user.id).select('username').lean()
