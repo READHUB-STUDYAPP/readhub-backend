@@ -62,6 +62,7 @@ const preferenceSchema = new Schema<INotificationPreference>(
       groups: toggle(),
       challenges: toggle(),
       events: toggle(),
+      buddies: toggle(),
       books: toggle(),
       // Account and security matters always reach the reader by mail, which is
       // the only channel that still works when they have lost access.
