@@ -17,6 +17,10 @@ import discoverRoutes from './routes/discover.route.js'
 import noteRoutes from './routes/notes.route.js'
 import adminRoutes from './routes/admin.route.js'
 import groupRoutes from './routes/group.route.js'
+import { startNotificationScheduler } from './services/notificationScheduler.js'
+import communityRoutes from './routes/community.route.js'
+import notificationRoutes from './routes/notification.route.js'
+import authorRoutes from './routes/author.route.js'
 
 dotenv.config()
 
@@ -62,10 +66,20 @@ app.use('/api/notes', noteRoutes)
 app.use('/api/discover', discoverRoutes)
 app.use('/api/admin', adminRoutes)
 app.use('/api/groups', groupRoutes)
+app.use('/api/communities', communityRoutes)
+app.use('/api/notifications', notificationRoutes)
+app.use('/api/authors', authorRoutes)
 
 const PORT = process.env.PORT || 5000
 
 app.listen(PORT, async () => {
   await connectDB()
   console.log(`Server is running on port ${PORT}`)
+
+  // Started after the database is up, because its first act is a query.
+  // Disabled by setting NOTIFICATIONS_SCHEDULER=off, which is what a one-off
+  // script or a second instance wants so it does not also poll the queue.
+  if (process.env.NOTIFICATIONS_SCHEDULER !== 'off') {
+    startNotificationScheduler()
+  }
 })
