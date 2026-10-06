@@ -124,6 +124,22 @@ function endOfQuietHours(preference: INotificationPreference, from: Date): Date 
  * caller can tell the difference between "told them" and "decided not to".
  */
 export async function notify(input: NotifyInput): Promise<INotification | null> {
+  // A notification is a consequence of something that already happened. If
+  // sending one fails -- a bad enum, a push service refusing, the database
+  // briefly unavailable -- the thing it was announcing is still true, and
+  // taking the caller's request down with it turns a missing notification into
+  // a failed join, a lost message, or a book that would not start. So this
+  // never throws: it reports and returns null, exactly as it does when the
+  // reader has simply switched the category off.
+  try {
+    return await send(input)
+  } catch (error) {
+    console.error('[notifications] could not send', input.type, error)
+    return null
+  }
+}
+
+async function send(input: NotifyInput): Promise<INotification | null> {
   const preference = await preferencesFor(input.user)
   const priority = input.priority ?? 'normal'
   const critical = priority === 'critical'

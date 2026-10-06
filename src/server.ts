@@ -21,6 +21,8 @@ import { startNotificationScheduler } from './services/notificationScheduler.js'
 import communityRoutes from './routes/community.route.js'
 import notificationRoutes from './routes/notification.route.js'
 import authorRoutes from './routes/author.route.js'
+import buddyRoutes from './routes/buddy.route.js'
+import moderationRoutes from './routes/moderation.route.js'
 
 dotenv.config()
 
@@ -69,6 +71,8 @@ app.use('/api/groups', groupRoutes)
 app.use('/api/communities', communityRoutes)
 app.use('/api/notifications', notificationRoutes)
 app.use('/api/authors', authorRoutes)
+app.use('/api/buddies', buddyRoutes)
+app.use('/api/moderation', moderationRoutes)
 
 const PORT = process.env.PORT || 5000
 
