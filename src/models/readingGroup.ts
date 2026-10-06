@@ -41,6 +41,16 @@ export interface IGroupTarget {
 }
 
 export interface IReadingGroup extends Document {
+  /**
+   * The community this group belongs to.
+   *
+   * Optional through the migration and required after it. Every pre-existing
+   * group was given a community of its own rather than being left stranded,
+   * so by the end of the backfill there is no such thing as a homeless group --
+   * but the field stays nullable in the schema until the counts reconcile in
+   * production, so a rollback is a deploy rather than a restore.
+   */
+  community?: Types.ObjectId
   name: string
   description?: string
   createdBy: Types.ObjectId
@@ -87,6 +97,7 @@ const targetSchema = new Schema<IGroupTarget>(
 
 const readingGroupSchema = new Schema<IReadingGroup>(
   {
+    community: { type: Schema.Types.ObjectId, ref: 'Community', index: true },
     name: { type: String, required: true, trim: true, maxlength: 80 },
     description: { type: String, trim: true, maxlength: 400 },
     createdBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },
