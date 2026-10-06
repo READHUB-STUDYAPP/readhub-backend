@@ -46,7 +46,8 @@ const PREMIUM: BuddyLimits = {
  * anyone moderating the feature can actually reach the pairs they moderate.
  */
 export function limitsFor(user?: { role?: string } | null): BuddyLimits {
-  if (user?.role === 'admin' || user?.role === 'superadmin') return PREMIUM
+  // `admin` is the only elevated role the User model defines.
+  if (user?.role === 'admin') return PREMIUM
   return FREE
 }
 
