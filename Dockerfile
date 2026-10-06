@@ -22,4 +22,16 @@ COPY --from=build /app/dist ./dist
 ENV NODE_ENV=production
 EXPOSE 5000
 
+# Drop root before the app runs (Trivy DS-0002).
+#
+# The container ran as root, so anything that reached code execution inside it
+# held full privileges over the image filesystem and any mounted volume. `node`
+# is an unprivileged uid 1000 the official image already ships, so adopting it
+# costs nothing.
+#
+# The chown is needed because both `npm ci` and the COPY above run as root, and
+# the app would otherwise own none of the files it runs from.
+RUN chown -R node:node /app
+USER node
+
 CMD ["node", "dist/server.js"]
