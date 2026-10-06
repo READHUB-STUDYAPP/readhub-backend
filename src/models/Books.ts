@@ -12,6 +12,31 @@ export interface IBook extends Document {
   status: BookStatus
   /** Opt-in: shared with every reader, and eligible for Trending. */
   isPublic: boolean
+  /**
+   * Set when this book is listed by a verified author rather than uploaded by
+   * a reader for themselves. The listing fields below only mean anything when
+   * it is present.
+   */
+  authorProfile?: Types.ObjectId
+  /** Shown on the listing; the author's own description of the book. */
+  synopsis?: string
+  genre?: string
+  language?: string
+  readingLevel?: string
+  /**
+   * Price in minor units (kobo), with the currency beside it.
+   *
+   * Stored now and charged later: payments are a separate piece of work, so a
+   * listing may carry a price while every book remains free to add. Integer
+   * minor units rather than a float, because money in a float is a rounding
+   * bug waiting for a busy day.
+   */
+  priceMinor?: number
+  currency?: string
+  listedAt?: Date
+  /** Running aggregate of bookReview, so a listing need not count them. */
+  ratingSum: number
+  ratingCount: number
   /** Set when this copy came from another reader's public book. */
   sourceBookId?: Types.ObjectId
   createdAt: Date
@@ -50,6 +75,16 @@ const bookSchema = new Schema<IBook>(
     },
     // Off unless the uploader turns it on. A book is someone's document until
     // they say otherwise, so sharing is never a default and never implicit.
+    authorProfile: { type: Schema.Types.ObjectId, ref: 'AuthorProfile', index: true },
+    synopsis: { type: String, maxlength: 4000 },
+    genre: { type: String, trim: true },
+    language: { type: String, trim: true },
+    readingLevel: { type: String, trim: true },
+    priceMinor: { type: Number, min: 0 },
+    currency: { type: String, default: 'NGN' },
+    listedAt: { type: Date },
+    ratingSum: { type: Number, default: 0, min: 0 },
+    ratingCount: { type: Number, default: 0, min: 0 },
     isPublic: {
       type: Boolean,
       default: false,
