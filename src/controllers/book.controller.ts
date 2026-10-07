@@ -6,6 +6,7 @@ import { isStoredFileUrl } from '../utils/validators.js'
 import Book from '../models/Books.js'
 import ReadingSession from '../models/readingSession.js'
 import UserStats from '../models/userStatistics.js'
+import { checkBookBadges, checkReadingBadges } from '../services/achievements.js'
 import Notes from '../models/Notes.js'
 
 const errMessage = (error: unknown): string =>
@@ -143,10 +144,19 @@ export const updateBookProgress = async (req: Request, res: Response) => {
         book.lastPageRead = Math.max(incoming, Number(book.lastPageRead) || 0)
       }
     }
+    const wasCompleted = book.status === 'completed'
     if (status) {
       book.status = status
     }
     await book.save()
+
+    // Only on the transition into "completed": the client sends the status on
+    // every progress update, so checking the value rather than the change
+    // would re-run this on every page turn of a finished book.
+    if (!wasCompleted && book.status === 'completed') {
+      void checkBookBadges(req.user.id)
+    }
+
     res.json({ message: 'Book progress updated successfully', book })
   } catch (error) {
     return res
@@ -363,6 +373,11 @@ export const endReading = async (req: Request, res: Response) => {
     stats.lastReadingDate = now
 
     await stats.save()
+
+    // A badge decorates something that already happened: finishing a reading
+    // session must not fail because the celebration did, so this is not
+    // awaited into the response.
+    void checkReadingBadges(userId)
 
     res.json(session)
   } catch (error) {

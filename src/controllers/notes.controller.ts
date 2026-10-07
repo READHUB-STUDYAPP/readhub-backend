@@ -2,6 +2,7 @@ import type { Request, Response } from 'express'
 import { isValidObjectId } from 'mongoose'
 import Book from '../models/Books.js'
 import Notes from '../models/Notes.js'
+import { checkNoteBadges } from '../services/achievements.js'
 
 const errMessage = (error: unknown): string =>
   error instanceof Error ? error.message : String(error)
@@ -83,6 +84,8 @@ export const createNote = async (req: Request, res: Response) => {
     })
 
     await newNote.save()
+
+    void checkNoteBadges(userId)
 
     // The note itself, not just a message: the client needs its id to render
     // the highlight and to delete it again without refetching the whole list.
