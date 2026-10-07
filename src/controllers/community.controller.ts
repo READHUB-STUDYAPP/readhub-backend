@@ -233,7 +233,17 @@ export const updateCommunity = async (req: Request, res: Response) => {
     const allowed = await requirePermission(communityId, req.user.id, 'editCommunity')
     if (!allowed.ok) return res.status(allowed.status).json({ message: allowed.message })
 
-    const fields = ['name', 'description', 'logoUrl', 'category', 'visibility', 'joinPolicy', 'postPolicy', 'membersVisible']
+    const fields = [
+      'name',
+      'description',
+      'logoUrl',
+      'coverUrl',
+      'category',
+      'visibility',
+      'joinPolicy',
+      'postPolicy',
+      'membersVisible',
+    ]
     const update: Record<string, unknown> = {}
     for (const field of fields) {
       if (req.body[field] !== undefined) update[field] = req.body[field]

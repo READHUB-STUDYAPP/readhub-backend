@@ -48,6 +48,16 @@ export interface ICommunity extends Document {
   name: string
   description?: string
   logoUrl?: string
+  /**
+   * The wide image behind the community's name.
+   *
+   * Separate from logoUrl because they are different pictures doing
+   * different jobs: a logo is small, square and shown beside the name in a
+   * list, a cover is wide and sits behind it. One field used for both gives
+   * a banner cropped from a square, or a list avatar cropped from a
+   * landscape -- either way, something stretched.
+   */
+  coverUrl?: string
   category: CommunityCategory
   visibility: CommunityVisibility
   joinPolicy: CommunityJoinPolicy
@@ -87,6 +97,7 @@ const communitySchema = new Schema<ICommunity>(
     name: { type: String, required: true, trim: true, maxlength: 80 },
     description: { type: String, trim: true, maxlength: 500 },
     logoUrl: { type: String, trim: true },
+    coverUrl: { type: String, trim: true },
     category: {
       type: String,
       required: true,
