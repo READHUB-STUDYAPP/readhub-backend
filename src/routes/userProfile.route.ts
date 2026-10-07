@@ -1,5 +1,6 @@
 import express from 'express'
 import { authenticate } from '../middlewares/auth.middleware.js'
+import { getMyAchievements } from '../controllers/achievement.controller.js'
 import {
   deleteUserProfile,
   getUserProfile,
@@ -78,6 +79,18 @@ router.get('/', authenticate, getUserProfile)
  *       404:
  *         description: User not found
  */
+/**
+ * @swagger
+ * /api/profile/achievements:
+ *   get:
+ *     summary: The caller's earned badges and live reading figures
+ *     tags: [Profile]
+ *     security: [{ bearerAuth: [] }]
+ *     responses:
+ *       200: { description: Earned achievements, the live summary, and the full catalogue }
+ */
+router.get('/achievements', authenticate, getMyAchievements)
+
 router.delete('/delete', authenticate, deleteUserProfile)
 
 export default router

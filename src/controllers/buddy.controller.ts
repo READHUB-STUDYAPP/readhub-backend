@@ -19,6 +19,11 @@ import UserReport, {
   type ReportSurface,
 } from '../models/userReport.js'
 import { limitsFor } from '../services/buddyLimits.js'
+import {
+  achievementsFor,
+  checkBuddyBadges,
+  readingSummaryFor,
+} from '../services/achievements.js'
 import { scoreMatch } from '../services/buddyMatching.js'
 import { cancelPending, notify } from '../services/notification.service.js'
 
@@ -360,9 +365,19 @@ export const getBuddyProfile = async (req: Request, res: Response) => {
       }
     }
 
+    // Section 7 of the PRD asks the buddy profile to carry a streak or a
+    // chosen achievement. Both halves go out together: the live figures say
+    // how they are doing, the badges say what they have done.
+    const [badges, summary] = await Promise.all([
+      achievementsFor(userId),
+      readingSummaryFor(userId),
+    ])
+
     return res.json({
       ...publicProfile(profile, user),
       acceptingRequests: profile.acceptingRequests,
+      achievements: badges,
+      reading: summary,
       match: match && {
         score: match.score,
         explanation: match.explanation,
@@ -583,6 +598,9 @@ export const respondToRequest = async (req: Request, res: Response) => {
     })
 
     await touch(req.user.id)
+
+    // Both sides have a buddy now, so both get the badge.
+    for (const id of users) void checkBuddyBadges(id)
 
     return res.status(201).json({ message: 'You are now buddies', buddy })
   } catch (error) {

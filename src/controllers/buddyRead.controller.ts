@@ -5,6 +5,7 @@ import Book from '../models/Books.js'
 import Buddy from '../models/buddy.js'
 import BuddyRead from '../models/buddyRead.js'
 import User from '../models/User.js'
+import { checkBuddyBadges } from '../services/achievements.js'
 import { notify } from '../services/notification.service.js'
 
 const errMessage = (error: unknown) => (error instanceof Error ? error.message : 'Unknown error')
@@ -185,6 +186,8 @@ export const updateProgress = async (req: Request, res: Response) => {
       buddy.currentRead = undefined
       buddy.completedReads += 1
       await buddy.save()
+
+      for (const user of buddy.users) void checkBuddyBadges(String(user))
 
       // Both sides hear about it: a finish is the pair's, not one person's.
       await Promise.all(
