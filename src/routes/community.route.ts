@@ -3,6 +3,7 @@ import express from 'express'
 import {
   createAnnouncement,
   createCommunity,
+  deleteCommunity,
   decideJoinRequest,
   deleteAnnouncement,
   discoverCommunities,
@@ -95,6 +96,19 @@ router.post('/join', joinCommunity)
 
 router.get('/:communityId', getCommunity)
 router.patch('/:communityId', updateCommunity)
+
+/**
+ * @swagger
+ * /api/communities/{communityId}:
+ *   delete:
+ *     summary: Delete a community (owner only; reading groups survive)
+ *     tags: [Communities]
+ *     security: [{ bearerAuth: [] }]
+ *     responses:
+ *       200: { description: What was removed, and how many groups were detached }
+ *       400: { description: The confirmation name did not match }
+ */
+router.delete('/:communityId', deleteCommunity)
 router.post('/:communityId/join', joinCommunity)
 router.delete('/:communityId/members/me', leaveCommunity)
 
