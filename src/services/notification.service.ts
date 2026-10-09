@@ -271,13 +271,19 @@ async function sendPush(notification: INotification): Promise<void> {
      * identical payloads, and Expo reported `ok` for all five. The receipt says
      * FCM accepted it; it says nothing about the phone showing it.
      *
-     * Google's guidance is that high priority is for messages that are
-     * user-visible and acted on immediately, which is exactly what these are:
-     * every row here becomes a notification in somebody's shade. `low` stays
-     * normal because nothing currently sends it and it is the one tier where
-     * waiting would be acceptable.
+     * High for all of them, the `low` tier included. An earlier version of
+     * this kept `low` at normal on the assumption nothing sent it. Six senders
+     * do, and they are the ones it matters most for: reading reminders, buddy
+     * nudges, weekly recaps, a badge being earned. Those are exactly the
+     * notifications nobody is sitting in the app waiting for, so a message
+     * Android may hold indefinitely is one that never arrives at all.
+     *
+     * `priority` still does work here -- it decides what overrides quiet hours
+     * and how rows are ordered. It simply stops deciding whether the phone is
+     * ever told. If a row was worth writing and a notification worth posting,
+     * it was worth delivering.
      */
-    priority: notification.priority === 'low' ? 'normal' : 'high',
+    priority: 'high',
     /**
      * The channel the app creates on first launch. Without it Expo falls back
      * to a channel of its own, which the reader cannot find in settings to
