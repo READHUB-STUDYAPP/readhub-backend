@@ -6,6 +6,7 @@ import Reminder from '../models/reminder.js'
 import User from '../models/User.js'
 import { sendEmail } from './email.js'
 import { dateStampIn, deliver, escapeHtml, notify, preferencesFor } from './notification.service.js'
+import { runBuddyAccountability } from './buddyAccountability.js'
 
 /**
  * The clock behind notifications.
@@ -62,6 +63,7 @@ export async function tick(now = new Date()): Promise<void> {
     await deliverDue(now)
     await fireReadingReminders(now)
     await runDailyEmailTracks(now)
+    await runDailyBuddySweep(now)
   } catch (error) {
     console.error('[notifications] tick failed', error)
   } finally {
@@ -173,6 +175,18 @@ async function runDailyEmailTracks(now: Date): Promise<void> {
 }
 
 /**
+ * The Reading Buddy sweeps, an hour after the email tracks.
+ *
+ * Deliberately not the same hour: both walk a lot of rows, and there is no
+ * reason to make one minute of the day carry all of it.
+ */
+async function runDailyBuddySweep(now: Date): Promise<void> {
+  if (now.getUTCHours() !== 10 || now.getUTCMinutes() !== 0) return
+
+  await runBuddyAccountability(now)
+}
+
+/**
  * Day 7, 21 and 60 since the last reading session, then silence.
  *
  * The ladder resets whenever someone reads, because the rung is computed from
@@ -216,7 +230,7 @@ async function sendNudge(userId: string, rung: number, now: Date): Promise<void>
     ? `You stopped on page ${book.lastPageRead} of ${escapeHtml(book.title)}. Picking it up again takes a few minutes.`
     : `You have not started a book on ReadHub yet. Even ten minutes of reading a day adds up faster than you would think.`
 
-  const sent = await notify({
+  await notify({
     user: userId,
     type: 'CONTINUE_READING',
     category: 'reading',
@@ -229,9 +243,10 @@ async function sendNudge(userId: string, rung: number, now: Date): Promise<void>
     // matters within a day.
     dedupeKey: `inactivity:${rung}:${dateStampIn(preference.timezone, now)}`,
     channels: ['email'],
+    // `inactivityEmails` and the unsubscribe stamp were both checked above.
+    // Without this the category toggle overrules them and nothing is sent.
+    governedByOwnPreference: true,
   })
-
-  if (sent) await mailNudge(user.email, subject, body, userId)
 }
 
 /**
@@ -274,7 +289,7 @@ async function sendFortnightlyResume(now: Date): Promise<void> {
       remaining > 0 ? ` -- ${remaining} pages to go` : ''
     }.`
 
-    const sent = await notify({
+    await notify({
       user: userId,
       type: 'CONTINUE_READING',
       category: 'reading',
@@ -285,44 +300,12 @@ async function sendFortnightlyResume(now: Date): Promise<void> {
       actionId: String(book._id),
       dedupeKey: `resume:${fortnight}`,
       channels: ['email'],
+      // Same as above: `fortnightlyResumeEmail` has already decided.
+      governedByOwnPreference: true,
     })
-
-    if (sent) await mailNudge(user.email, subject, body, userId)
   }
 }
 
-/**
- * The only mail ReadHub sends to people who did not just do something.
- *
- * Every one carries a one-click unsubscribe, as both a link and the header mail
- * clients read, and it is honoured without a login. It unsubscribes from nudges
- * alone -- a password reset must still arrive afterwards.
- */
-async function mailNudge(
-  to: string,
-  subject: string,
-  body: string,
-  userId: string,
-): Promise<void> {
-  const base = process.env.FRONTEND_URL ?? 'https://app.readhub.study'
-  const unsubscribe = `${base}/unsubscribe?u=${encodeURIComponent(userId)}`
-
-  await sendEmail({
-    to,
-    subject,
-    html: `
-      <div style="font-family:system-ui,sans-serif;max-width:520px;color:#0f172a">
-        <p style="font-size:16px;line-height:1.6">${body}</p>
-        <p><a href="${base}" style="display:inline-block;background:#2d7ff9;color:#fff;padding:10px 18px;border-radius:999px;text-decoration:none">Continue reading</a></p>
-        <hr style="border:none;border-top:1px solid #e3e8f0;margin:24px 0">
-        <p style="font-size:12px;color:#6b7a90">
-          You are receiving this because reading reminders are on.
-          <a href="${unsubscribe}" style="color:#4b6481">Unsubscribe from reminders</a>.
-          This does not affect account or security emails.
-        </p>
-      </div>`,
-  })
-}
 
 /* ------------------------------------------------------------------ helpers */
 

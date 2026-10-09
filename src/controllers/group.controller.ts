@@ -4,6 +4,8 @@ import { Types } from 'mongoose'
 
 import Book from '../models/Books.js'
 import GroupProgress from '../models/groupProgress.js'
+import Community from '../models/community.js'
+import CommunityMember, { can } from '../models/communityMember.js'
 import ReadingGroup, { MAX_BOOKS, MAX_MEMBERS } from '../models/readingGroup.js'
 
 /**
@@ -78,6 +80,38 @@ export const createGroup = async (req: Request, res: Response) => {
       return res.status(400).json({ message: 'A group needs a name' })
     }
 
+    // A group may belong to a community, in which case the caller has to be a
+    // member of it with permission to create one. Checked here rather than in
+    // a separate route because everything else about making a group -- the
+    // invite code, the owner membership, the retry on a code collision -- is
+    // identical whether or not there is a community above it.
+    const communityId = String(req.body?.community ?? '').trim()
+    let community = null
+
+    if (communityId) {
+      if (!Types.ObjectId.isValid(communityId)) {
+        return res.status(404).json({ message: 'That community could not be found' })
+      }
+
+      const membership = await CommunityMember.findOne({
+        community: communityId,
+        user: userId,
+      }).lean()
+
+      // Not a member means not found, so a stranger cannot confirm a private
+      // community exists by being refused.
+      if (!membership) {
+        return res.status(404).json({ message: 'That community could not be found' })
+      }
+      if (!can(membership.role, 'createGroup')) {
+        return res
+          .status(403)
+          .json({ message: 'You do not have permission to create a group here' })
+      }
+
+      community = communityId
+    }
+
     // Retried rather than checked-then-written: two people creating a group at
     // the same moment could otherwise pass the same check and collide on the
     // unique index.
@@ -87,9 +121,16 @@ export const createGroup = async (req: Request, res: Response) => {
           name,
           description: String(req.body?.description ?? '').trim() || undefined,
           createdBy: userId,
+          community: community ?? undefined,
           members: [{ user: userId, role: 'owner', visible: true, joinedAt: new Date() }],
           inviteCode: makeInviteCode(),
         })
+
+        // The count is denormalised onto the community so the list screen does
+        // not have to count groups per community on every read.
+        if (community) {
+          await Community.updateOne({ _id: community }, { $inc: { groupCount: 1 } })
+        }
 
         return res.status(201).json({ group })
       } catch (error) {

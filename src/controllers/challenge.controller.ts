@@ -1,12 +1,14 @@
 import type { Request, Response } from 'express'
 import { Types } from 'mongoose'
 
+import Book from '../models/Books.js'
 import Challenge from '../models/challenge.js'
 import ChallengeParticipant from '../models/challengeParticipant.js'
 import CommunityMember, { can } from '../models/communityMember.js'
 import ReadingSession from '../models/readingSession.js'
 import User from '../models/User.js'
 import { dateStampIn } from '../services/notification.service.js'
+import { checkChallengeBadges } from '../services/achievements.js'
 import { notifyMany } from '../services/notification.service.js'
 import { recordActivity } from './community.controller.js'
 
@@ -137,11 +139,26 @@ export const joinChallenge = async (req: Request, res: Response) => {
     })
     if (existing) return res.json(existing)
 
-    const participant = await ChallengeParticipant.create({
-      challenge: challengeId,
-      community: communityId,
-      user: req.user.id,
-    })
+    // Same race as joining a community: the unique index decides, and losing
+    // it means someone already joined on this caller's behalf.
+    let participant
+    try {
+      participant = await ChallengeParticipant.create({
+        challenge: challengeId,
+        community: communityId,
+        user: req.user.id,
+      })
+    } catch (error) {
+      if ((error as { code?: number }).code === 11000) {
+        const already = await ChallengeParticipant.findOne({
+          challenge: challengeId,
+          user: req.user.id,
+        })
+        return res.json(already)
+      }
+      throw error
+    }
+
     await Challenge.updateOne({ _id: challengeId }, { $inc: { participantCount: 1 } })
 
     const user = await User.findById(req.user.id).select('username').lean()
@@ -179,6 +196,34 @@ export const leaveChallenge = async (req: Request, res: Response) => {
 }
 
 /**
+ * Has this participant met the challenge's target?
+ *
+ * The target's meaning follows the goal rather than being a separate unit --
+ * 20 means twenty days for "read every day" and twenty minutes for "read for a
+ * total time" -- so the comparison has to branch on the goal too.
+ */
+function meetsTarget(
+  goal: string,
+  target: number,
+  progress: { daysActive: string[]; minutesRead: number; pagesRead: number; booksCompleted: number },
+): boolean {
+  switch (goal) {
+    case 'read-daily':
+    case 'complete-schedule':
+      return progress.daysActive.length >= target
+    case 'read-minutes':
+      return progress.minutesRead >= target
+    case 'read-pages':
+      return progress.pagesRead >= target
+    case 'read-books':
+    case 'finish-book':
+      return progress.booksCompleted >= target
+    default:
+      return false
+  }
+}
+
+/**
  * The board for one challenge.
  *
  * Recomputed from reading sessions before it is shown, so the figures are what
@@ -211,7 +256,24 @@ export const getChallengeBoard = async (req: Request, res: Response) => {
           challenge.endsAt,
         )
         Object.assign(participant, fresh)
-        await ChallengeParticipant.updateOne({ _id: participant._id }, { $set: fresh })
+
+        // `completedAt` was declared but never written, so a finished
+        // challenge stayed indistinguishable from an unfinished one. The
+        // recompute above is the only place that knows both the progress and
+        // the target, so it is where finishing gets recorded -- once, because
+        // the condition requires it to be unset.
+        const update: Record<string, unknown> = { ...fresh }
+        const justFinished =
+          !participant.completedAt && meetsTarget(challenge.goal, challenge.target, fresh)
+        if (justFinished) update.completedAt = new Date()
+
+        await ChallengeParticipant.updateOne({ _id: participant._id }, { $set: update })
+
+        if (justFinished) {
+          const userId = String(participant.user?._id ?? participant.user)
+          participant.completedAt = update.completedAt as Date
+          void checkChallengeBadges(userId)
+        }
       }),
     )
 
@@ -254,9 +316,19 @@ async function recomputeProgress(userId: string, from: Date, to: Date) {
     pages += session.pagesRead ?? 0
   }
 
+  // Books finished inside the window. Without this the two book-shaped goals
+  // -- "read a number of books" and "finish a book" -- have nothing to measure
+  // against, so a reader could never complete one however much they read.
+  const booksCompleted = await Book.countDocuments({
+    uploadedBy: userId,
+    status: 'completed',
+    updatedAt: { $gte: from, $lte: to },
+  })
+
   return {
     daysActive: [...days],
     minutesRead: Math.round(minutes),
     pagesRead: pages,
+    booksCompleted,
   }
 }

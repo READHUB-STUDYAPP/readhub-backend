@@ -24,6 +24,7 @@ export type NotificationCategory =
   | 'groups'
   | 'challenges'
   | 'events'
+  | 'buddies'
   | 'books'
   | 'system'
 
@@ -49,6 +50,17 @@ export type NotificationType =
   | 'GROUP_DISCUSSION_REPLY'
   | 'GROUP_MENTION'
   | 'GROUP_MILESTONE'
+  // reading buddies
+  | 'BUDDY_REQUEST'
+  | 'BUDDY_REQUEST_ACCEPTED'
+  | 'BUDDY_MESSAGE'
+  | 'BUDDY_READ_STARTED'
+  | 'BUDDY_PROGRESS'
+  | 'BUDDY_MILESTONE'
+  | 'BUDDY_NUDGE'
+  | 'BUDDY_WEEKLY_RECAP'
+  | 'BUDDY_INACTIVE'
+  | 'BUDDY_READ_COMPLETED'
   // books and authors
   | 'BOOK_RECOMMENDATION'
   | 'AUTHOR_UPDATE'
@@ -108,7 +120,10 @@ const notificationSchema = new Schema<INotification>(
     category: {
       type: String,
       required: true,
-      enum: ['reading', 'community', 'groups', 'challenges', 'events', 'books', 'system'],
+      // Keep in step with NotificationCategory above: the union is what the
+      // compiler checks and this is what the database checks, and only one of
+      // them catches a mismatch at runtime.
+      enum: ['reading', 'community', 'groups', 'challenges', 'events', 'buddies', 'books', 'system'],
     },
     title: { type: String, required: true, maxlength: 140 },
     message: { type: String, required: true, maxlength: 500 },

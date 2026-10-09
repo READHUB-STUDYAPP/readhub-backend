@@ -233,7 +233,17 @@ export const updateCommunity = async (req: Request, res: Response) => {
     const allowed = await requirePermission(communityId, req.user.id, 'editCommunity')
     if (!allowed.ok) return res.status(allowed.status).json({ message: allowed.message })
 
-    const fields = ['name', 'description', 'logoUrl', 'category', 'visibility', 'joinPolicy', 'postPolicy', 'membersVisible']
+    const fields = [
+      'name',
+      'description',
+      'logoUrl',
+      'coverUrl',
+      'category',
+      'visibility',
+      'joinPolicy',
+      'postPolicy',
+      'membersVisible',
+    ]
     const update: Record<string, unknown> = {}
     for (const field of fields) {
       if (req.body[field] !== undefined) update[field] = req.body[field]
@@ -278,7 +288,21 @@ export const joinCommunity = async (req: Request, res: Response) => {
       return res.status(202).json({ message: 'Your request has been sent to the admins' })
     }
 
-    await CommunityMember.create({ community: community._id, user: req.user.id, role: 'member' })
+    // Two joins can race -- a double-tapped button, a retried request, or a
+    // client effect that fires twice -- and both would pass the membership
+    // check above before either had written. The unique index on
+    // {community, user} is what actually decides, so a duplicate here means
+    // the other one won and this caller is already in. That is a success for
+    // them, not an error.
+    try {
+      await CommunityMember.create({ community: community._id, user: req.user.id, role: 'member' })
+    } catch (error) {
+      if ((error as { code?: number }).code === 11000) {
+        return res.json({ message: 'Already a member', community })
+      }
+      throw error
+    }
+
     await Community.updateOne({ _id: community._id }, { $inc: { memberCount: 1 } })
 
     const user = await User.findById(req.user.id).select('username').lean()
