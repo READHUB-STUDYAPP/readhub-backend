@@ -23,6 +23,7 @@ import notificationRoutes from './routes/notification.route.js'
 import authorRoutes from './routes/author.route.js'
 import buddyRoutes from './routes/buddy.route.js'
 import moderationRoutes from './routes/moderation.route.js'
+import { emailConfiguration } from './services/email.js'
 
 dotenv.config()
 
@@ -79,6 +80,17 @@ const PORT = process.env.PORT || 5000
 app.listen(PORT, async () => {
   await connectDB()
   console.log(`Server is running on port ${PORT}`)
+
+  // Say plainly whether mail can be sent. An unconfigured mailer fails
+  // silently -- every send returns success:false and most callers never look
+  // -- so the only symptom is that nobody gets anything. One line here means
+  // the deploy log answers the question.
+  const mail = emailConfiguration()
+  console.log(
+    mail.configured
+      ? `[email] configured, sending as ${mail.from}`
+      : `[email] NOT configured -- no mail will be sent (${mail.reason})`,
+  )
 
   // Started after the database is up, because its first act is a query.
   // Disabled by setting NOTIFICATIONS_SCHEDULER=off, which is what a one-off

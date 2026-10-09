@@ -12,6 +12,7 @@ import NotificationPreference, {
   type INotificationPreference,
 } from '../models/notificationPreference.js'
 import { sendEmail } from './email.js'
+import { emailLayout } from './emailLayout.js'
 
 /**
  * The one way anything in ReadHub tells a reader something.
@@ -40,6 +41,21 @@ export interface NotifyInput {
   expiresAt?: Date
   /** Channels to consider. Preferences still apply to each. */
   channels?: NotificationChannel[]
+  /**
+   * Set when the caller has already consulted a preference of its own.
+   *
+   * The two re-engagement tracks do: the scheduler checks `inactivityEmails`
+   * and `fortnightlyResumeEmail`, and whether the reader has used the
+   * one-click unsubscribe, before it gets here. The category toggle then
+   * checked a *second*, different switch -- `categories.reading.email`, which
+   * defaults to false -- and dropped the message. Two switches disagreeing,
+   * and the result was that no reading reminder was ever sent to anybody.
+   *
+   * This says: that decision has been made, by something that knows more about
+   * this message than a category does. Quiet hours and deduplication still
+   * apply.
+   */
+  governedByOwnPreference?: boolean
 }
 
 /** How long a dedupe key suppresses a repeat. */
@@ -146,8 +162,9 @@ async function send(input: NotifyInput): Promise<INotification | null> {
 
   const toggles = preference.categories?.[input.category]
 
-  // Everything except account and security matters is the reader's choice.
-  if (!critical && toggles && !toggles.inApp && !toggles.push && !toggles.email) {
+  // Everything except account and security matters is the reader's choice --
+  // unless a dedicated preference has already made the choice for this one.
+  if (!critical && !input.governedByOwnPreference && toggles && !toggles.inApp && !toggles.push && !toggles.email) {
     return null
   }
 
@@ -164,7 +181,7 @@ async function send(input: NotifyInput): Promise<INotification | null> {
   }
 
   const wanted = input.channels ?? ['in_app', 'push']
-  const channels = critical
+  const channels = critical || input.governedByOwnPreference
     ? wanted
     : wanted.filter((channel) => {
         if (!toggles) return true
@@ -285,6 +302,19 @@ async function sendPush(notification: INotification): Promise<void> {
   }
 }
 
+/**
+ * The one place a notification becomes an email.
+ *
+ * It used to send `<p>message</p>` and nothing else -- no logo, no link to the
+ * thing it was about, no way to stop receiving them. The scheduler worked
+ * around that by sending its own, better, parallel email, which meant two
+ * senders for one message and, once the delivery gate was fixed, would have
+ * meant two emails landing for every reminder.
+ *
+ * So there is one sender now. It carries the brand, a link to whatever the
+ * notification points at, and -- for anything that is not an account or
+ * security matter -- the one-click unsubscribe, honoured without a login.
+ */
 async function sendNotificationEmail(notification: INotification): Promise<void> {
   const populated = await Notification.findById(notification._id)
     .populate<{ user: { email?: string; username?: string } }>('user', 'email username')
@@ -293,10 +323,37 @@ async function sendNotificationEmail(notification: INotification): Promise<void>
   const email = populated?.user?.email
   if (!email) return
 
+  const base = (process.env.FRONTEND_URL ?? 'https://app.readhub.study').replace(/\/$/, '')
+
+  // `actionRoute` is a route name the clients understand rather than a path,
+  // so only the ones with an obvious web destination become a link.
+  const WEB_ROUTES: Record<string, string> = {
+    reader: '/library',
+    library: '/library',
+    'community-challenges': '/communities',
+    '/buddies': '/buddies',
+    '/communities': '/communities',
+    '/profile': '/profile',
+    '/buddies/requests': '/buddies?tab=requests',
+  }
+  const path = notification.actionRoute ? WEB_ROUTES[notification.actionRoute] : undefined
+
+  // Account and security mail must arrive whatever else is switched off, so it
+  // is the one kind that carries no unsubscribe.
+  const unsubscribeUrl =
+    notification.priority === 'critical' || notification.category === 'system'
+      ? undefined
+      : `${base}/unsubscribe?u=${encodeURIComponent(String(notification.user))}`
+
   await sendEmail({
     to: email,
     subject: notification.title,
-    html: `<p>${escapeHtml(notification.message)}</p>`,
+    html: emailLayout({
+      heading: notification.title,
+      bodyHtml: `<p style="margin:0">${escapeHtml(notification.message)}</p>`,
+      action: path ? { label: 'Open ReadHub', url: `${base}${path}` } : undefined,
+      unsubscribeUrl,
+    }),
   })
 }
 

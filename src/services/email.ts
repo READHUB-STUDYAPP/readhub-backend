@@ -15,6 +15,22 @@ interface SendEmailOptions {
   html: string
 }
 
+/**
+ * Whether mail can be sent at all, for the startup log.
+ *
+ * Without this the only way to discover that email is unconfigured is that
+ * nobody receives anything -- `sendEmail` returns `{ success: false }` and
+ * most callers do not look. One line at boot turns a silent misconfiguration
+ * into something the deploy log answers.
+ */
+export function emailConfiguration(): { configured: boolean; from?: string; reason?: string } {
+  const apiKey = process.env.RESEND_API_KEY
+  const emailFrom = process.env.EMAIL_FROM
+  if (!apiKey) return { configured: false, reason: 'RESEND_API_KEY is not set' }
+  if (!emailFrom) return { configured: false, reason: 'EMAIL_FROM is not set' }
+  return { configured: true, from: emailFrom }
+}
+
 export async function sendEmail({ to, subject, html }: SendEmailOptions): Promise<SendResult> {
   try {
     const apiKey = process.env.RESEND_API_KEY
