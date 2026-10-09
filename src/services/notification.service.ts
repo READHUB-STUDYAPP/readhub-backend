@@ -258,7 +258,32 @@ async function sendPush(notification: INotification): Promise<void> {
     title: notification.title,
     body: notification.message,
     sound: 'default',
-    priority: notification.priority === 'critical' ? 'high' : 'normal',
+    /**
+     * High, for everything a reader is meant to actually see.
+     *
+     * This used to send 'high' only for critical and 'normal' for the rest,
+     * which meant almost nothing arrived. Expo maps this straight onto FCM's
+     * priority, and a normal-priority message is one Android is free to hold
+     * until the app next happens to wake -- which, for a backgrounded app on a
+     * phone with ordinary battery management, can be hours or never. Measured
+     * on a Galaxy S10e against one device token: three high-priority sends all
+     * arrived, two normal-priority sends never did, seconds apart with
+     * identical payloads, and Expo reported `ok` for all five. The receipt says
+     * FCM accepted it; it says nothing about the phone showing it.
+     *
+     * Google's guidance is that high priority is for messages that are
+     * user-visible and acted on immediately, which is exactly what these are:
+     * every row here becomes a notification in somebody's shade. `low` stays
+     * normal because nothing currently sends it and it is the one tier where
+     * waiting would be acceptable.
+     */
+    priority: notification.priority === 'low' ? 'normal' : 'high',
+    /**
+     * The channel the app creates on first launch. Without it Expo falls back
+     * to a channel of its own, which the reader cannot find in settings to
+     * tune or silence.
+     */
+    channelId: 'default',
     data: {
       notificationId: String(notification._id),
       route: notification.actionRoute,
