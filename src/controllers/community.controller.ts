@@ -8,6 +8,8 @@ import CommunityActivity, {
   ACTIVITY_TTL_DAYS,
   type ActivityType,
 } from '../models/communityActivity.js'
+import Challenge from '../models/challenge.js'
+import ChallengeParticipant from '../models/challengeParticipant.js'
 import CommunityJoinRequest from '../models/communityJoinRequest.js'
 import CommunityMember, {
   can,
@@ -341,6 +343,85 @@ export const leaveCommunity = async (req: Request, res: Response) => {
     await Community.updateOne({ _id: communityId }, { $inc: { memberCount: -1 } })
 
     return res.json({ message: 'You have left the community' })
+  } catch (error) {
+    return res.status(500).json({ message: errMessage(error) })
+  }
+}
+
+/**
+ * Delete a community.
+ *
+ * The permission ladder has promised this since communities were built --
+ * `deleteCommunity: RANK.owner` -- with nothing wired to it, so the only way
+ * to get rid of one was to make it private and leave it there. That is not the
+ * same thing, and it has meant abandoned communities accumulating where
+ * readers can still stumble into them by invite code.
+ *
+ * What goes, and what does not:
+ *
+ *   Goes.  The community, its memberships, announcements, challenges and the
+ *          participation in them, join requests, and the activity feed. None
+ *          of it means anything without the community above it.
+ *   Stays. The reading groups. A group has its own members, its own books and
+ *          its own conversation; the community is an umbrella over it, and
+ *          taking the umbrella away must not destroy what was under it. They
+ *          are detached and carry on as standalone groups, which is exactly
+ *          what they were before communities existed.
+ *
+ * The caller must send the community's name back. This is irreversible and
+ * takes a lot with it, and an owner who has typed the name is an owner who
+ * meant this one rather than the one above it in a list.
+ */
+export const deleteCommunity = async (req: Request, res: Response) => {
+  try {
+    if (!req.user?.id) return res.status(401).json({ message: 'Unauthorized' })
+
+    const communityId = param(req.params.communityId)
+    const allowed = await requirePermission(communityId, req.user.id, 'deleteCommunity')
+    if (!allowed.ok) return res.status(allowed.status).json({ message: allowed.message })
+
+    const community = await Community.findById(communityId).lean()
+    if (!community) return res.status(404).json({ message: 'Community not found' })
+
+    const confirm = String(req.body?.confirm ?? '').trim()
+    if (confirm !== community.name) {
+      return res.status(400).json({
+        message: 'Type the community name to confirm. This cannot be undone.',
+      })
+    }
+
+    // Groups first, and detached rather than deleted -- if anything below
+    // fails, the worst outcome is a group that briefly has no community, not a
+    // group that is gone.
+    const detached = await ReadingGroup.updateMany(
+      { community: communityId },
+      { $unset: { community: '' } },
+    )
+
+    const [members, announcements, challenges, participants, requests, activity] =
+      await Promise.all([
+        CommunityMember.deleteMany({ community: communityId }),
+        Announcement.deleteMany({ community: communityId }),
+        Challenge.deleteMany({ community: communityId }),
+        ChallengeParticipant.deleteMany({ community: communityId }),
+        CommunityJoinRequest.deleteMany({ community: communityId }),
+        CommunityActivity.deleteMany({ community: communityId }),
+      ])
+
+    await Community.deleteOne({ _id: communityId })
+
+    return res.json({
+      message: `${community.name} has been deleted`,
+      removed: {
+        members: members.deletedCount ?? 0,
+        announcements: announcements.deletedCount ?? 0,
+        challenges: challenges.deletedCount ?? 0,
+        challengeParticipants: participants.deletedCount ?? 0,
+        joinRequests: requests.deletedCount ?? 0,
+        activity: activity.deletedCount ?? 0,
+      },
+      groupsDetached: detached.modifiedCount ?? 0,
+    })
   } catch (error) {
     return res.status(500).json({ message: errMessage(error) })
   }
