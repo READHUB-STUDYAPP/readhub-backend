@@ -469,7 +469,17 @@ export const passwordOTP = async (req: Request, res: Response) => {
       message: `Verification code sent to ${email}, check your inbox or spam folder`,
     })
 
-    sendVerificationEmail(email, username)
+    // Deliberately after the response: nobody should wait on mail. But the
+    // result is checked now, because a send that quietly fails is how this
+    // went unnoticed -- the caller was told "code sent" either way.
+    void sendVerificationEmail(email, username).then((result) => {
+      if (!result.success) {
+        console.error('[auth] verification email did not send', {
+          to: email,
+          error: result.error,
+        })
+      }
+    })
   } catch (error) {
     return res.status(500).json({
       message: `Error in forget password API ${errMessage(error)}`,

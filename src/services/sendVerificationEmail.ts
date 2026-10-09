@@ -1,6 +1,7 @@
 import { randomInt } from 'node:crypto'
 import VerificationCode from '../models/Verify-user.js'
 import { sendEmail, type SendResult } from './email.js'
+import { codeBlock, emailLayout } from './emailLayout.js'
 
 /**
  * Six-digit password-reset code.
@@ -10,6 +11,9 @@ import { sendEmail, type SendResult } from './email.js'
  * standing between an attacker and a password reset. Same reasoning the admin
  * invite flow already follows with randomBytes.
  */
+const escapeHtml = (value: string): string =>
+  value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+
 function generateCode(): string {
   return randomInt(100000, 1000000).toString()
 }
@@ -27,17 +31,15 @@ export async function sendVerificationEmail(
     await VerificationCode.create({ email, code, expiresAt })
 
     const firstName = (fullName || '').trim().split(' ')[0] || 'there'
-    const html = `
-      <div style="font-family:Arial,Helvetica,sans-serif;max-width:480px;margin:auto;padding:24px;color:#1a1a1a">
-        <h2 style="margin:0 0 16px">Verify your ReadHub email</h2>
-        <p style="margin:0 0 16px">Hi ${firstName}, use this code to verify your ReadHub account:</p>
-        <p style="margin:0 0 24px;text-align:center">
-          <span style="display:inline-block;font-size:32px;font-weight:700;letter-spacing:8px;background:#f2f4ff;color:#2f6bff;padding:14px 24px;border-radius:10px">${code}</span>
-        </p>
-        <p style="margin:0;color:#5f5f61;font-size:14px">
-          This code expires in 10 minutes. If you didn't request it, you can ignore this email.
-        </p>
-      </div>`
+    const html = emailLayout({
+      heading: 'Verify your ReadHub email',
+      bodyHtml: `
+        <p style="margin:0">Hi ${escapeHtml(firstName)}, use this code to verify your ReadHub account:</p>
+        ${codeBlock(code)}`,
+      footnote: "This code expires in 10 minutes. If you did not ask for it, you can ignore this email.",
+      // Deliberately no unsubscribe: a verification code has to arrive
+      // whatever else a reader has turned off.
+    })
 
     return await sendEmail({
       to: email,
