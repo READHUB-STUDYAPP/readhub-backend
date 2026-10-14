@@ -7,6 +7,7 @@ import Book from '../models/Books.js'
 import ReadingSession from '../models/readingSession.js'
 import UserStats from '../models/userStatistics.js'
 import { checkBookBadges, checkReadingBadges } from '../services/achievements.js'
+import { syncSharedProgress } from '../services/sharedProgress.js'
 import Notes from '../models/Notes.js'
 
 const errMessage = (error: unknown): string =>
@@ -156,6 +157,12 @@ export const updateBookProgress = async (req: Request, res: Response) => {
     if (!wasCompleted && book.status === 'completed') {
       void checkBookBadges(req.user.id)
     }
+
+    // Everywhere this book is shared learns the new position from here, rather
+    // than waiting for the reader to type it in somewhere else. Awaited so the
+    // group and buddy screens are already right by the time the reader looks
+    // at them -- it is two indexed queries, and it never throws.
+    await syncSharedProgress(req.user.id, String(book._id), book.lastPageRead)
 
     res.json({ message: 'Book progress updated successfully', book })
   } catch (error) {
