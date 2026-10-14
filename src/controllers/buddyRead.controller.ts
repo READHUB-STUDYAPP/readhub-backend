@@ -4,8 +4,8 @@ import { Types } from 'mongoose'
 import Book from '../models/Books.js'
 import Buddy from '../models/buddy.js'
 import BuddyRead from '../models/buddyRead.js'
+import { announceBuddyProgress, applyBuddyReadProgress } from '../services/sharedProgress.js'
 import User from '../models/User.js'
-import { checkBuddyBadges } from '../services/achievements.js'
 import { notify } from '../services/notification.service.js'
 
 const errMessage = (error: unknown) => (error instanceof Error ? error.message : 'Unknown error')
@@ -148,74 +148,16 @@ export const updateProgress = async (req: Request, res: Response) => {
       return res.status(400).json({ message: 'That page number could not be read' })
     }
 
-    const entry = read.progress.find((row) => String(row.user) === req.user!.id)
-    const previous = entry?.page ?? 0
-    const now = Math.round(page)
-
-    if (entry) {
-      entry.page = now
-      entry.updatedAt = new Date()
-    } else {
-      read.progress.push({ user: new Types.ObjectId(req.user.id), page: now, updatedAt: new Date() })
-    }
-
-    // Reaching the target is worth marking once, and only once.
-    const target = read.targetPage
-    const justFinished =
-      target !== undefined && now >= target && previous < target && !entry?.completedAt
-
-    if (justFinished && entry) entry.completedAt = new Date()
-
-    // The pair finishes when both have. That is the moment worth celebrating.
-    const everyoneDone =
-      target !== undefined &&
-      read.progress.length === 2 &&
-      read.progress.every((row) => row.page >= target)
-
-    if (everyoneDone && read.status === 'active') {
-      read.status = 'completed'
-      read.completedAt = new Date()
-    }
-
+    // Shared with the automatic path, so a page recorded by reading and a page
+    // typed in here cannot disagree about when somebody finished. Progress
+    // arrives on its own now; this endpoint stays for a paper copy, or a book
+    // somebody is reading outside the app.
+    const outcome = applyBuddyReadProgress(read, req.user.id, page)
     await read.save()
 
-    const me = await User.findById(req.user.id).select('username').lean()
-    const partner = partnerOf(buddy.users, req.user.id)
-
-    if (everyoneDone) {
-      buddy.currentRead = undefined
-      buddy.completedReads += 1
-      await buddy.save()
-
-      for (const user of buddy.users) void checkBuddyBadges(String(user))
-
-      // Both sides hear about it: a finish is the pair's, not one person's.
-      await Promise.all(
-        buddy.users.map((user) =>
-          notify({
-            user: String(user),
-            type: 'BUDDY_READ_COMPLETED',
-            category: 'buddies',
-            title: `You both finished ${read.bookTitle}`,
-            message: 'That is one more book read together. Pick the next one when you are ready.',
-            actionRoute: '/buddies',
-            actionId: String(buddy._id),
-            dedupeKey: `buddy-read-done:${read._id}`,
-          }),
-        ),
-      )
-    } else if (justFinished && partner) {
-      await notify({
-        user: partner,
-        type: 'BUDDY_MILESTONE',
-        category: 'buddies',
-        title: `${me?.username ?? 'Your buddy'} reached the target`,
-        message: `They finished their part of ${read.bookTitle}. No rush -- carry on at your own pace.`,
-        actionRoute: '/buddies',
-        actionId: String(buddy._id),
-        dedupeKey: `buddy-milestone:${read._id}:${req.user.id}`,
-      })
-    }
+    // The same announcement the automatic path makes, so a finish reads the
+    // same however the page got there.
+    await announceBuddyProgress(read, buddy, req.user.id, outcome)
 
     return res.json(read)
   } catch (error) {
