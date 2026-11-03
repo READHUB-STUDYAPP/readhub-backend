@@ -238,6 +238,7 @@ export const updateCommunity = async (req: Request, res: Response) => {
     const fields = [
       'name',
       'description',
+      'rules',
       'logoUrl',
       'coverUrl',
       'category',

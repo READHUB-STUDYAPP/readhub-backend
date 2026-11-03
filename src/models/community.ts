@@ -58,6 +58,12 @@ export interface ICommunity extends Document {
    * landscape -- either way, something stretched.
    */
   coverUrl?: string
+  /**
+   * The house rules, as the owner writes them. Plain text rather than a list
+   * of fields: every book club's rules are its own, and a fixed set of
+   * toggles would fit none of them.
+   */
+  rules?: string
   category: CommunityCategory
   visibility: CommunityVisibility
   joinPolicy: CommunityJoinPolicy
@@ -96,6 +102,7 @@ const communitySchema = new Schema<ICommunity>(
   {
     name: { type: String, required: true, trim: true, maxlength: 80 },
     description: { type: String, trim: true, maxlength: 500 },
+    rules: { type: String, trim: true, maxlength: 4000 },
     logoUrl: { type: String, trim: true },
     coverUrl: { type: String, trim: true },
     category: {
