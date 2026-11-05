@@ -18,6 +18,7 @@ import {
 } from '../controllers/buddy.controller.js'
 import {
   abandonRead,
+  addReadBookToLibrary,
   listReads,
   startRead,
   updateProgress,
@@ -119,6 +120,16 @@ router.post('/:buddyId/reads', startRead)
 router.patch('/:buddyId/reads/:readId/progress', updateProgress)
 router.patch('/:buddyId/reads/:readId/goal', updateReadGoal)
 router.delete('/:buddyId/reads/:readId', abandonRead)
+
+/**
+ * Adds the shared book to the caller's own library.
+ *
+ * A book belongs to one reader, so a pair reading together need one copy each.
+ * This is the partner's way to get theirs when it was not handed over at the
+ * start -- and it refuses a private upload rather than copying somebody's own
+ * document on their behalf.
+ */
+router.post('/:buddyId/reads/:readId/library', addReadBookToLibrary)
 
 /* ------------------------------------------------------------ the chat */
 
