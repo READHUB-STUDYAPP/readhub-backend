@@ -5,6 +5,7 @@ import Book from '../models/Books.js'
 import Buddy from '../models/buddy.js'
 import BuddyRead from '../models/buddyRead.js'
 import { announceBuddyProgress, applyBuddyReadProgress } from '../services/sharedProgress.js'
+import { copyForReader, myCopyOf, shareableRootOf } from '../services/bookSharing.js'
 import User from '../models/User.js'
 import { notify } from '../services/notification.service.js'
 
@@ -39,10 +40,54 @@ export const listReads = async (req: Request, res: Response) => {
 
     const reads = await BuddyRead.find({ buddy: buddy._id })
       .sort({ startedAt: -1 })
-      .populate('book', 'title author coverImage pageCount')
+      /*
+        The field names the Book model actually has.
+
+        This asked for `coverImage` and `pageCount`, which are spelled
+        `coverImageUrl` and `pages`. A select naming fields that do not exist
+        is not an error in Mongoose -- it simply returns none of them -- so the
+        cover had never once been sent, and the card had nothing to draw.
+      */
+      .populate('book', 'title coverImageUrl pages isPublic sourceBookId uploadedBy')
       .lean()
 
-    return res.json(reads)
+    /*
+      Which row this particular reader can open.
+
+      Never the id on the read itself unless they happen to be the one who
+      chose it: a book belongs to one reader, so the partner needs their own
+      copy, and telling them to open somebody else's would 404.
+    */
+    const shaped = await Promise.all(
+      reads.map(async (read) => {
+        const bookId = (read.book as { _id?: unknown })?._id ?? read.book
+        const [mine, shareable] = await Promise.all([
+          myCopyOf(req.user!.id, String(bookId)),
+          shareableRootOf(String(bookId)),
+        ])
+
+        return {
+          ...read,
+          /** The id to open. Absent when this reader has no copy. */
+          myBookId: mine ? String(mine._id) : null,
+          /*
+            Which reader to send them to, worked out here rather than shipping
+            the file URL. The partner may not be entitled to the chooser's
+            file at all, and a URL on the wire is a URL whoever holds it can
+            fetch -- so only the shape of their *own* copy is reported.
+          */
+          myBookFormat: mine
+            ? String(mine.fileUrl).toLowerCase().endsWith('.pdf')
+              ? 'pdf'
+              : 'epub'
+            : null,
+          /** Whether one can be added, which only a public original allows. */
+          canAddToLibrary: !mine && Boolean(shareable),
+        }
+      }),
+    )
+
+    return res.json(shaped)
   } catch (error) {
     return res.status(500).json({ message: errMessage(error) })
   }
@@ -68,7 +113,19 @@ export const startRead = async (req: Request, res: Response) => {
       return res.status(400).json({ message: 'Choose a book to read together' })
     }
 
-    const book = await Book.findById(bookId).select('title pageCount').lean()
+    /*
+      The caller's own book, or one anybody may read.
+
+      Unscoped before, so any book id at all could be named -- including a
+      private upload belonging to a stranger, whose title then appeared in a
+      space they had nothing to do with.
+    */
+    const book = await Book.findOne({
+      _id: bookId,
+      $or: [{ uploadedBy: req.user.id }, { isPublic: true }],
+    })
+      .select('title pages isPublic sourceBookId uploadedBy')
+      .lean()
     if (!book) return res.status(404).json({ message: 'That book could not be found' })
 
     const existing = await BuddyRead.findOne({ buddy: buddy._id, status: 'active' }).lean()
@@ -104,13 +161,37 @@ export const startRead = async (req: Request, res: Response) => {
     const me = await User.findById(req.user.id).select('username').lean()
     const partner = partnerOf(buddy.users, req.user.id)
 
+    /*
+      Give the partner the book, where that is ours to give.
+
+      Agreeing to read something together is useless if only one of you can
+      open it. A public original is copied into their library the same way
+      adding from Explore does; a private upload is not, because agreeing to
+      read a book together is not the owner publishing it. They are told which
+      of the two happened rather than left with a title and no book.
+
+      Best effort on purpose: the read is already created and the pair should
+      not lose it because a copy could not be made.
+    */
+    let sharedWithPartner = false
+    if (partner) {
+      try {
+        const handed = await copyForReader(partner, bookId)
+        sharedWithPartner = handed.ok
+      } catch (error) {
+        console.error('[buddies] could not give the partner a copy', error)
+      }
+    }
+
     if (partner) {
       await notify({
         user: partner,
         type: 'BUDDY_READ_STARTED',
         category: 'buddies',
         title: 'A new book to read together',
-        message: `${me?.username ?? 'Your buddy'} started ${book.title}. Set your pace and get going.`,
+        message: sharedWithPartner
+          ? `${me?.username ?? 'Your buddy'} started ${book.title}. It is in your library -- set your pace and get going.`
+          : `${me?.username ?? 'Your buddy'} started ${book.title}. Add your own copy to read along.`,
         actionRoute: '/buddies',
         actionId: String(buddy._id),
         dedupeKey: `buddy-read:${read._id}`,
@@ -225,6 +306,58 @@ export const updateReadGoal = async (req: Request, res: Response) => {
     if (!read) return res.status(404).json({ message: 'That shared read could not be found' })
 
     return res.json(read)
+  } catch (error) {
+    return res.status(500).json({ message: errMessage(error) })
+  }
+}
+
+/**
+ * Puts the shared book in the caller's own library.
+ *
+ * The way back from every case where the copy did not happen on its own: the
+ * partner joined before this existed, the owner made the book public after the
+ * read had already started, or the copy failed and nobody noticed. Safe to call
+ * repeatedly -- an existing copy is returned rather than refused, because the
+ * button that calls this is one a confused reader will press twice.
+ */
+export const addReadBookToLibrary = async (req: Request, res: Response) => {
+  try {
+    if (!req.user?.id) return res.status(401).json({ message: 'Unauthorized' })
+
+    const buddy = await myBuddy(param(req.params.buddyId), req.user.id)
+    if (!buddy) return res.status(404).json({ message: 'That buddy space could not be found' })
+
+    const read = await BuddyRead.findOne({
+      _id: param(req.params.readId),
+      buddy: buddy._id,
+    }).lean()
+    if (!read) return res.status(404).json({ message: 'That shared read could not be found' })
+
+    const handed = await copyForReader(req.user.id, String(read.book))
+
+    if (!handed.ok) {
+      if (handed.reason === 'not-found') {
+        return res.status(404).json({ message: 'That book could not be found' })
+      }
+
+      /*
+        Said plainly, and without blaming the reader.
+
+        A private upload is the owner's document. We will not copy it, and the
+        reader cannot do anything about that from here -- so the message points
+        at the only thing that would work.
+      */
+      return res.status(409).json({
+        message:
+          'This is your buddy’s own copy, so it cannot be shared. Add the book to your library to read along.',
+      })
+    }
+
+    return res.status(handed.created ? 201 : 200).json({
+      message: handed.created ? 'Added to your library' : 'Already in your library',
+      book: handed.book,
+      myBookId: String(handed.book._id),
+    })
   } catch (error) {
     return res.status(500).json({ message: errMessage(error) })
   }
