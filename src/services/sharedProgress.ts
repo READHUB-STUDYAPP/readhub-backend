@@ -2,6 +2,7 @@ import { Types } from 'mongoose'
 
 import Buddy, { type IBuddy } from '../models/buddy.js'
 import BuddyRead, { type IBuddyRead } from '../models/buddyRead.js'
+import { bookFamilyIds } from './bookSharing.js'
 import GroupProgress from '../models/groupProgress.js'
 import ReadingGroup from '../models/readingGroup.js'
 import User from '../models/User.js'
@@ -168,7 +169,21 @@ export async function syncSharedProgress(
   if (!Number.isFinite(page) || page < 0) return
 
   try {
-    await Promise.all([syncGroups(userId, bookId, page), syncBuddyReads(userId, bookId, page)])
+    /*
+      Every row that is this book, not just the one in this reader's hand.
+
+      A book belongs to one reader and a second reader gets a copy with its own
+      id, so a shared read created from one person's library could never be
+      matched by the other person turning pages. Their bar sat at zero however
+      much they read, which looked like the pair disagreeing about the book
+      rather than like a join that could not succeed.
+    */
+    const family = await bookFamilyIds(bookId)
+
+    await Promise.all([
+      syncGroups(userId, family, page),
+      syncBuddyReads(userId, bookId, family, page),
+    ])
   } catch (error) {
     // The reader's own progress is already saved; this is the part that can be
     // picked up again on their next page turn.
@@ -178,33 +193,49 @@ export async function syncSharedProgress(
 
 async function syncGroups(
   userId: string,
-  bookId: Types.ObjectId | string,
+  family: Types.ObjectId[],
   page: number,
 ): Promise<void> {
-  // Only groups that both contain this reader and are reading this book.
-  const groups = await ReadingGroup.find({ 'members.user': userId, 'books.book': bookId })
-    .select('_id')
+  // Only groups that both contain this reader and are reading this book --
+  // where "this book" is any copy of it, for the same reason buddy reads are.
+  const groups = await ReadingGroup.find({
+    'members.user': userId,
+    'books.book': { $in: family },
+  })
+    .select('_id books.book')
     .lean()
 
   if (groups.length === 0) return
 
   await Promise.all(
-    groups.map((group) =>
-      GroupProgress.updateOne(
-        { group: group._id, book: bookId, user: userId },
+    groups.map((group) => {
+      /*
+        Progress is recorded against the copy the *group* is reading, not the
+        one this reader owns, so everybody's rows line up on one id.
+      */
+      const shared = (group.books ?? [])
+        .map((entry: { book?: Types.ObjectId }) => entry.book)
+        .find((candidate?: Types.ObjectId) =>
+          family.some((id) => String(id) === String(candidate)),
+        )
+      if (!shared) return Promise.resolve()
+
+      return GroupProgress.updateOne(
+        { group: group._id, book: shared, user: userId },
         // `$max` rather than `$set`: the same book may be read on the web and
         // on a phone that was offline, and whichever syncs last would
         // otherwise drag the other backwards.
         { $max: { lastPageRead: page } },
         { upsert: true },
-      ),
-    ),
+      )
+    }),
   )
 }
 
 async function syncBuddyReads(
   userId: string,
   bookId: Types.ObjectId | string,
+  family: Types.ObjectId[],
   page: number,
 ): Promise<void> {
   const pairs = await Buddy.find({ users: userId, status: 'active' }).select('_id').lean()
@@ -212,7 +243,8 @@ async function syncBuddyReads(
 
   const reads = await BuddyRead.find({
     buddy: { $in: pairs.map((pair) => pair._id) },
-    book: bookId,
+    // Any copy of the agreed book, since the pair hold one each.
+    book: { $in: family.length ? family : [bookId] },
     status: 'active',
   })
 
